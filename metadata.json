@@ -1,0 +1,6 @@
+{
+  "name": "LECO Carbon Footprint Accounting Platform",
+  "description": "Comprehensive GHG Protocol Scope 1, 2, and 3 Carbon Footprint calculation, analytics, and reporting web application for LECO (Lanka Electricity Company).",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
