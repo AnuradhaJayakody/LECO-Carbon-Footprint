@@ -9,6 +9,7 @@ import { Scope3Section } from './components/Scope3Section';
 import { GhgReports } from './components/GhgReports';
 import { QuickCalculator } from './components/QuickCalculator';
 import { FacilitiesManager } from './components/FacilitiesManager';
+import { UserManager } from './components/UserManager';
 import { EmissionFactorsManager } from './components/EmissionFactorsManager';
 import { SupabaseSyncView } from './components/SupabaseSyncView';
 import { 
@@ -24,11 +25,12 @@ import {
   Zap,
   Flame,
   Layers,
-  Leaf
+  Leaf,
+  Users
 } from 'lucide-react';
 
 const MainApp: React.FC = () => {
-  const { user, login, logout, isSuperAdmin, toast, notify } = useAuth();
+  const { user, login, logout, isSuperAdmin, notification, notify } = useAuth();
   const [activeTab, setActiveTab] = useState<TabKey>('dashboard');
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
 
@@ -54,6 +56,11 @@ const MainApp: React.FC = () => {
   const handleFillDemoSuperAdmin = () => {
     setEmail('superadmincf@leco.com');
     setPassword('Sadmin@cf369');
+  };
+
+  const handleFillDemoBranchAdmin = () => {
+    setEmail('admin.western@leco.com');
+    setPassword('Leco@2025');
   };
 
   const handleFillDemoOfficer = () => {
@@ -141,7 +148,7 @@ const MainApp: React.FC = () => {
             <button
               type="submit"
               disabled={loginLoading}
-              className="w-full py-2.5 bg-[#064E3B] hover:bg-emerald-900 active:bg-emerald-950 text-white font-bold rounded-xl transition shadow-sm flex items-center justify-center gap-2"
+              className="w-full py-2.5 bg-[#064E3B] hover:bg-emerald-900 active:bg-emerald-950 text-white font-bold rounded-xl transition shadow-sm flex items-center justify-center gap-2 cursor-pointer"
             >
               {loginLoading ? (
                 <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
@@ -159,14 +166,14 @@ const MainApp: React.FC = () => {
             <span className="text-[10px] text-slate-400 uppercase tracking-wider font-bold block text-center">
               Quick Role Test Credentials
             </span>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-3 gap-1.5">
               <button
                 type="button"
                 onClick={handleFillDemoSuperAdmin}
-                className="p-2.5 bg-slate-50 hover:bg-emerald-50 text-left rounded-xl border border-slate-200 hover:border-emerald-200 transition group"
+                className="p-2 bg-slate-50 hover:bg-emerald-50 text-left rounded-xl border border-slate-200 hover:border-emerald-200 transition group"
               >
-                <span className="text-[10px] font-bold text-slate-800 block group-hover:text-emerald-800">
-                  Super Admin (Full CRUD)
+                <span className="text-[10px] font-bold text-slate-800 block group-hover:text-emerald-800 truncate">
+                  Super Admin
                 </span>
                 <span className="text-[9px] text-slate-500 font-mono block truncate">
                   superadmincf@leco.com
@@ -175,11 +182,24 @@ const MainApp: React.FC = () => {
 
               <button
                 type="button"
-                onClick={handleFillDemoOfficer}
-                className="p-2.5 bg-slate-50 hover:bg-emerald-50 text-left rounded-xl border border-slate-200 hover:border-emerald-200 transition group"
+                onClick={handleFillDemoBranchAdmin}
+                className="p-2 bg-slate-50 hover:bg-indigo-50 text-left rounded-xl border border-slate-200 hover:border-indigo-200 transition group"
               >
-                <span className="text-[10px] font-bold text-slate-800 block group-hover:text-emerald-800">
-                  Facility Officer
+                <span className="text-[10px] font-bold text-slate-800 block group-hover:text-indigo-800 truncate">
+                  Branch Admin
+                </span>
+                <span className="text-[9px] text-slate-500 font-mono block truncate">
+                  admin.western@leco.com
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleFillDemoOfficer}
+                className="p-2 bg-slate-50 hover:bg-emerald-50 text-left rounded-xl border border-slate-200 hover:border-emerald-200 transition group"
+              >
+                <span className="text-[10px] font-bold text-slate-800 block group-hover:text-emerald-800 truncate">
+                  Facility User
                 </span>
                 <span className="text-[9px] text-slate-500 font-mono block truncate">
                   officer.kalutara@leco.com
@@ -200,23 +220,23 @@ const MainApp: React.FC = () => {
   return (
     <div className="min-h-screen bg-[#F8FAFC] flex flex-col font-sans text-slate-900 antialiased">
       {/* Toast Notification Container */}
-      {toast && (
+      {notification && (
         <div className="fixed bottom-5 right-5 z-50 animate-bounce">
           <div
             className={`px-4 py-3 rounded-2xl shadow-xl border text-xs font-semibold flex items-center space-x-2.5 ${
-              toast.type === 'error'
+              notification.type === 'error'
                 ? 'bg-red-900 text-white border-red-700'
-                : toast.type === 'info'
+                : notification.type === 'info'
                 ? 'bg-sky-900 text-white border-sky-700'
                 : 'bg-[#064E3B] text-emerald-200 border-emerald-600/40'
             }`}
           >
-            {toast.type === 'error' ? (
+            {notification.type === 'error' ? (
               <AlertCircle className="w-4 h-4 text-red-400" />
             ) : (
               <CheckCircle2 className="w-4 h-4 text-emerald-400" />
             )}
-            <span>{toast.message}</span>
+            <span>{notification.message}</span>
           </div>
         </div>
       )}
@@ -247,6 +267,7 @@ const MainApp: React.FC = () => {
           {activeTab === 'reports' && <GhgReports />}
           {activeTab === 'calculator' && <QuickCalculator />}
           {activeTab === 'facilities' && <FacilitiesManager />}
+          {activeTab === 'users' && <UserManager />}
           {activeTab === 'emission-factors' && <EmissionFactorsManager />}
           {activeTab === 'supabase-sql' && <SupabaseSyncView />}
         </main>

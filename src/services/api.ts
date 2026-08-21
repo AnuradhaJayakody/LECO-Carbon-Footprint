@@ -1,5 +1,6 @@
 import { 
   Facility, 
+  FacilityJobRole,
   User, 
   EmissionFactorEntry, 
   Scope1VehicleRecord, 
@@ -46,11 +47,26 @@ export const api = {
       body: JSON.stringify({ email, password })
     }),
 
+  // Users
   getUsers: () => fetchJSON<User[]>(`${API_BASE}/users`),
   createUser: (userData: Partial<User>) => 
     fetchJSON<User>(`${API_BASE}/users`, {
       method: 'POST',
       body: JSON.stringify(userData)
+    }),
+  updateUser: (id: string, userData: Partial<User>) => 
+    fetchJSON<User>(`${API_BASE}/users/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(userData)
+    }),
+  deleteUser: (id: string) => 
+    fetchJSON<{ success: boolean }>(`${API_BASE}/users/${id}`, {
+      method: 'DELETE'
+    }),
+  toggleUserDelete: (id: string, canDelete: boolean) => 
+    fetchJSON<User>(`${API_BASE}/users/${id}/toggle-delete`, {
+      method: 'PUT',
+      body: JSON.stringify({ canDelete })
     }),
 
   // Facilities
@@ -67,6 +83,15 @@ export const api = {
     }),
   deleteFacility: (id: string) => 
     fetchJSON<{ success: boolean }>(`${API_BASE}/facilities/${id}`, {
+      method: 'DELETE'
+    }),
+  addFacilityJobRole: (facilityId: string, roleName: string, description?: string) =>
+    fetchJSON<FacilityJobRole>(`${API_BASE}/facilities/${facilityId}/job-roles`, {
+      method: 'POST',
+      body: JSON.stringify({ roleName, description })
+    }),
+  deleteFacilityJobRole: (facilityId: string, roleId: string) =>
+    fetchJSON<{ success: boolean }>(`${API_BASE}/facilities/${facilityId}/job-roles/${roleId}`, {
       method: 'DELETE'
     }),
 

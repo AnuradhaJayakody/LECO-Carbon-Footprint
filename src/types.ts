@@ -3,16 +3,31 @@
  * Core TypeScript Type Definitions based on GHG Protocol Standard
  */
 
-export type UserRole = 'super_admin' | 'facility_officer' | 'sustainability_lead' | 'auditor';
+export type UserRole = 'super_admin' | 'branch_admin' | 'facility_user' | 'facility_officer' | 'sustainability_lead' | 'auditor';
+
+export interface FacilityJobRole {
+  id: string;
+  facilityId: string;
+  roleName: string;
+  description?: string;
+  createdAt?: string;
+}
 
 export interface User {
   id: string;
   email: string;
   name: string;
   role: UserRole;
-  facilityId?: string;
+  jobRole?: string; // Specific job title assigned from the facility's dynamic job roles
+  facilityId?: string; // Assigned primary facility for facility_user
   facilityName?: string;
+  assignedFacilityIds?: string[]; // Multiple facilities assigned to a branch_admin
+  canDelete: boolean; // Granular toggle for deletion capability across the platform
+  allowedModules?: string[]; // Granular modules for branch_admin (e.g., ['dashboard', 'scope1', 'scope2', 'scope3', 'reports', 'facilities', 'users', 'calculator'])
+  isImmutableRootAdmin?: boolean; // Root superadmin protection flag
+  isActive?: boolean;
   department?: string;
+  contactNumber?: string;
   createdAt?: string;
 }
 
@@ -36,13 +51,16 @@ export interface Facility {
   region?: string;
   staffCount?: number;
   floorAreaSqFt?: number;
-  responsibleOfficer: string;
+  responsibleOfficer: string; // Head of Facility / Person Responsible
   officerEmail?: string;
   contactNumber?: string;
+  headDesignation?: string;
+  jobRoles?: FacilityJobRole[]; // Dynamically defined job roles for this facility
   electricityAccountNo?: string;
   meterNumbers?: string[];
   hasSolarPV?: boolean;
   solarCapacityKW?: number;
+  createdAt?: string;
 }
 
 export interface EmissionFactor {

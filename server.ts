@@ -27,15 +27,19 @@ async function startServer() {
     // Check Super Admin default credentials
     if (cleanEmail === 'superadmincf@leco.com') {
       if (password === 'Sadmin@cf369' || password === 'admin' || !password) {
+        const rootAdmin = db.getUsers().find(u => u.email.toLowerCase() === 'superadmincf@leco.com') || {
+          id: 'usr-1',
+          email: 'superadmincf@leco.com',
+          name: 'Super Admin (LECO Sustainability Lead)',
+          role: 'super_admin' as const,
+          canDelete: true,
+          isImmutableRootAdmin: true,
+          allowedModules: ['dashboard', 'scope1', 'scope2', 'scope3', 'reports', 'facilities', 'users', 'emission-factors', 'supabase-sql', 'calculator'],
+          department: 'Corporate Sustainability & Executive Engineering',
+          createdAt: new Date().toISOString()
+        };
         return res.json({
-          user: {
-            id: 'usr-1',
-            email: 'superadmincf@leco.com',
-            name: 'Super Admin (LECO Sustainability Lead)',
-            role: 'super_admin',
-            department: 'Corporate Sustainability & Executive Engineering',
-            createdAt: new Date().toISOString()
-          },
+          user: rootAdmin,
           token: 'jwt-super-admin-token'
         });
       } else {
@@ -58,9 +62,12 @@ async function startServer() {
         id: `usr-${Date.now()}`,
         email: cleanEmail,
         name: cleanEmail.split('@')[0].replace('.', ' ').toUpperCase(),
-        role: 'facility_officer' as const,
+        role: 'facility_user' as const,
         facilityId: 'fac-1',
         facilityName: 'LECO Head Office',
+        canDelete: false,
+        isImmutableRootAdmin: false,
+        allowedModules: ['dashboard', 'scope1', 'scope2', 'scope3', 'calculator'],
         department: 'Operations',
         createdAt: new Date().toISOString()
       };
@@ -77,23 +84,67 @@ async function startServer() {
   });
 
   app.post('/api/users', (req: Request, res: Response) => {
-    const { email, name, role, facilityId, department } = req.body;
-    if (!email || !name) {
-      return res.status(400).json({ error: 'Email and Name are required' });
+    try {
+      const { email, name, role, facilityId, assignedFacilityIds, jobRole, canDelete, allowedModules, department, contactNumber } = req.body;
+      if (!email || !name) {
+        return res.status(400).json({ error: 'Email and Name are required' });
+      }
+      const fac = facilityId ? db.getFacilities().find(f => f.id === facilityId) : undefined;
+      const newUser = {
+        id: `usr-${Date.now()}`,
+        email: String(email).trim().toLowerCase(),
+        name: String(name).trim(),
+        role: role || 'facility_user',
+        facilityId: role === 'facility_user' ? facilityId : undefined,
+        facilityName: fac?.name,
+        assignedFacilityIds: role === 'branch_admin' ? (assignedFacilityIds || []) : undefined,
+        jobRole: jobRole || undefined,
+        canDelete: Boolean(canDelete),
+        allowedModules: allowedModules || ['dashboard', 'scope1', 'scope2', 'scope3', 'reports', 'calculator'],
+        department,
+        contactNumber,
+        isImmutableRootAdmin: false,
+        isActive: true,
+        createdAt: new Date().toISOString()
+      };
+      const created = db.addUser(newUser);
+      res.json(created);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message || 'Failed to create user' });
     }
-    const fac = db.getFacilities().find(f => f.id === facilityId);
-    const newUser = {
-      id: `usr-${Date.now()}`,
-      email: String(email).trim().toLowerCase(),
-      name,
-      role: role || 'facility_officer',
-      facilityId,
-      facilityName: fac?.name,
-      department,
-      createdAt: new Date().toISOString()
-    };
-    db.addUser(newUser);
-    res.json(newUser);
+  });
+
+  app.put('/api/users/:id', (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+      const updates = req.body;
+      const updated = db.updateUser(id, updates);
+      if (!updated) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+      res.json(updated);
+    } catch (err: any) {
+      res.status(400).json({ error: err.message || 'Failed to update user' });
+    }
+  });
+
+  app.delete('/api/users/:id', (req: Request, res: Response) => {
+    const { id } = req.params;
+    const result = db.deleteUser(id);
+    if (!result.success) {
+      return res.status(403).json({ error: result.message || 'Cannot delete this user profile.' });
+    }
+    res.json({ success: true });
+  });
+
+  app.put('/api/users/:id/toggle-delete', (req: Request, res: Response) => {
+    const { id } = req.params;
+    const { canDelete } = req.body;
+    const updated = db.toggleUserDeletePermission(id, Boolean(canDelete));
+    if (!updated) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    res.json(updated);
   });
 
   // Facilities
@@ -104,6 +155,7 @@ async function startServer() {
   app.post('/api/facilities', (req: Request, res: Response) => {
     const newFac = {
       id: `fac-${Date.now()}`,
+      jobRoles: [],
       ...req.body
     };
     const saved = db.addFacility(newFac);
@@ -118,6 +170,26 @@ async function startServer() {
 
   app.delete('/api/facilities/:id', (req: Request, res: Response) => {
     const success = db.deleteFacility(req.params.id);
+    res.json({ success });
+  });
+
+  // Facility Job Roles dynamic endpoints
+  app.post('/api/facilities/:facilityId/job-roles', (req: Request, res: Response) => {
+    const { facilityId } = req.params;
+    const { roleName, description } = req.body;
+    if (!roleName) {
+      return res.status(400).json({ error: 'Role name is required' });
+    }
+    const role = db.addFacilityJobRole(facilityId, roleName, description);
+    if (!role) {
+      return res.status(404).json({ error: 'Facility not found' });
+    }
+    res.json(role);
+  });
+
+  app.delete('/api/facilities/:facilityId/job-roles/:roleId', (req: Request, res: Response) => {
+    const { facilityId, roleId } = req.params;
+    const success = db.deleteFacilityJobRole(facilityId, roleId);
     res.json({ success });
   });
 

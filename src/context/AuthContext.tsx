@@ -1,19 +1,47 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import { User, Facility } from '../types';
+import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
+import { User, Facility, FacilityJobRole } from '../types';
 import { api } from '../services/api';
 
 interface AuthContextType {
   user: User | null;
   isAuthenticated: boolean;
   isSuperAdmin: boolean;
+  isBranchAdmin: boolean;
+  isFacilityUser: boolean;
+  canDelete: boolean;
+  isImmutableRootAdmin: boolean;
+  
+  // Access Control Helpers
+  canAccessModule: (moduleKey: string) => boolean;
+  hasFacilityAccess: (facilityId: string) => boolean;
+  accessibleFacilities: Facility[];
+  
+  // Auth actions
   login: (email: string, password?: string) => Promise<void>;
   logout: () => void;
+  switchUser: (targetUser: User) => void;
+  
+  // Year & Facility selection
   selectedYear: number;
   setSelectedYear: (year: number) => void;
   selectedFacilityId: string;
   setSelectedFacilityId: (id: string) => void;
+  
+  // Facilities & Job Roles
   facilities: Facility[];
   refreshFacilities: () => Promise<void>;
+  addFacilityJobRole: (facilityId: string, roleName: string, description?: string) => Promise<FacilityJobRole | null>;
+  deleteFacilityJobRole: (facilityId: string, roleId: string) => Promise<boolean>;
+  
+  // Users Management
+  users: User[];
+  refreshUsers: () => Promise<void>;
+  createUser: (userData: Partial<User>) => Promise<User>;
+  updateUser: (id: string, userData: Partial<User>) => Promise<User>;
+  deleteUser: (id: string) => Promise<boolean>;
+  toggleUserDelete: (id: string, canDelete: boolean) => Promise<void>;
+  
+  // Toast notifications
   notification: { type: 'success' | 'error' | 'info'; message: string } | null;
   notify: (message: string, type?: 'success' | 'error' | 'info') => void;
   clearNotification: () => void;
@@ -21,12 +49,12 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const LOCAL_STORAGE_USER_KEY = 'leco_cf_auth_user';
+const LOCAL_STORAGE_USER_KEY = 'leco_cf_auth_user_v2';
 const LOCAL_STORAGE_YEAR_KEY = 'leco_cf_selected_year';
 const LOCAL_STORAGE_FACILITY_KEY = 'leco_cf_selected_fac';
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  // Pre-seed with Super Admin so users can immediately view the live system without getting blocked
+  // Pre-seed with Super Admin so users can immediately view the live system
   const [user, setUser] = useState<User | null>(() => {
     try {
       const saved = localStorage.getItem(LOCAL_STORAGE_USER_KEY);
@@ -34,13 +62,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } catch (e) {
       console.error(e);
     }
-    // Default logged in as Super Admin for instant convenience
+    // Default logged in as Super Admin
     return {
       id: 'usr-1',
       email: 'superadmincf@leco.com',
       name: 'Super Admin (LECO Sustainability Lead)',
       role: 'super_admin',
       department: 'Corporate Sustainability & Executive Engineering',
+      canDelete: true,
+      isImmutableRootAdmin: true,
+      allowedModules: ['dashboard', 'scope1', 'scope2', 'scope3', 'reports', 'facilities', 'users', 'emission-factors', 'supabase-sql', 'calculator'],
+      isActive: true,
+      contactNumber: '+94 11 237 1600',
       createdAt: new Date().toISOString()
     };
   });
@@ -56,6 +89,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   });
 
   const [facilities, setFacilities] = useState<Facility[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
   const [notification, setNotification] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
 
   const notify = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
@@ -86,8 +120,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const refreshUsers = async () => {
+    try {
+      const uList = await api.getUsers();
+      setUsers(uList);
+    } catch (e) {
+      console.error('Error fetching users:', e);
+    }
+  };
+
   useEffect(() => {
     refreshFacilities();
+    refreshUsers();
   }, []);
 
   const login = async (email: string, password?: string) => {
@@ -95,7 +139,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const res = await api.login(email, password);
       setUser(res.user);
       localStorage.setItem(LOCAL_STORAGE_USER_KEY, JSON.stringify(res.user));
-      notify(`Welcome, ${res.user.name}! Authenticated as ${res.user.role === 'super_admin' ? 'Super Admin' : 'Officer'}.`, 'success');
+      const roleLabel = res.user.role === 'super_admin' ? 'Super Admin' : res.user.role === 'branch_admin' ? 'Branch Admin' : 'Facility Officer';
+      notify(`Welcome back, ${res.user.name}! Signed in as ${roleLabel}.`, 'success');
     } catch (err: any) {
       notify(err.message || 'Login failed', 'error');
       throw err;
@@ -108,8 +153,134 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     notify('Logged out successfully', 'info');
   };
 
-  const isAuthenticated = !!user;
+  const switchUser = (targetUser: User) => {
+    setUser(targetUser);
+    localStorage.setItem(LOCAL_STORAGE_USER_KEY, JSON.stringify(targetUser));
+    const roleLabel = targetUser.role === 'super_admin' ? 'Super Admin' : targetUser.role === 'branch_admin' ? 'Branch Admin' : 'Facility User';
+    notify(`Switched session to ${targetUser.name} (${roleLabel})`, 'info');
+  };
+
   const isSuperAdmin = user?.role === 'super_admin';
+  const isBranchAdmin = user?.role === 'branch_admin';
+  const isFacilityUser = user?.role === 'facility_user' || user?.role === 'facility_officer';
+  const isImmutableRootAdmin = Boolean(user?.isImmutableRootAdmin || user?.email?.toLowerCase() === 'superadmincf@leco.com');
+  const canDelete = isSuperAdmin ? true : Boolean(user?.canDelete);
+
+  // Granular Module Access Control
+  const canAccessModule = (moduleKey: string): boolean => {
+    if (!user) return false;
+    if (user.role === 'super_admin') return true;
+    if (user.allowedModules && user.allowedModules.length > 0) {
+      return user.allowedModules.includes(moduleKey);
+    }
+    // Default module permissions
+    if (moduleKey === 'users' || moduleKey === 'emission-factors' || moduleKey === 'supabase-sql') {
+      return user.role === 'super_admin' || (user.role === 'branch_admin' && user.allowedModules?.includes(moduleKey));
+    }
+    return true;
+  };
+
+  // Facility Scope Filtering
+  const hasFacilityAccess = (facilityId: string): boolean => {
+    if (!user || facilityId === 'ALL') return true;
+    if (user.role === 'super_admin') return true;
+    if (user.role === 'branch_admin') {
+      return (user.assignedFacilityIds || []).includes(facilityId);
+    }
+    return user.facilityId === facilityId;
+  };
+
+  const accessibleFacilities = useMemo(() => {
+    if (!user || user.role === 'super_admin') {
+      return facilities;
+    }
+    if (user.role === 'branch_admin') {
+      const allowedIds = user.assignedFacilityIds || [];
+      return facilities.filter(f => allowedIds.includes(f.id));
+    }
+    if (user.facilityId) {
+      return facilities.filter(f => f.id === user.facilityId);
+    }
+    return facilities;
+  }, [user, facilities]);
+
+  // Facility Job Roles API bindings
+  const addFacilityJobRole = async (facilityId: string, roleName: string, description?: string) => {
+    try {
+      const newRole = await api.addFacilityJobRole(facilityId, roleName, description);
+      await refreshFacilities();
+      notify(`Job role "${roleName}" added successfully`, 'success');
+      return newRole;
+    } catch (err: any) {
+      notify(err.message || 'Failed to add job role', 'error');
+      return null;
+    }
+  };
+
+  const deleteFacilityJobRole = async (facilityId: string, roleId: string) => {
+    try {
+      await api.deleteFacilityJobRole(facilityId, roleId);
+      await refreshFacilities();
+      notify('Job role removed', 'info');
+      return true;
+    } catch (err: any) {
+      notify(err.message || 'Failed to remove job role', 'error');
+      return false;
+    }
+  };
+
+  // User Management API bindings
+  const createUser = async (userData: Partial<User>): Promise<User> => {
+    try {
+      const created = await api.createUser(userData);
+      await refreshUsers();
+      notify(`User ${created.name} (${created.email}) created successfully`, 'success');
+      return created;
+    } catch (err: any) {
+      notify(err.message || 'Failed to create user', 'error');
+      throw err;
+    }
+  };
+
+  const updateUser = async (id: string, userData: Partial<User>): Promise<User> => {
+    try {
+      const updated = await api.updateUser(id, userData);
+      await refreshUsers();
+      if (user && user.id === id) {
+        setUser(updated);
+        localStorage.setItem(LOCAL_STORAGE_USER_KEY, JSON.stringify(updated));
+      }
+      notify(`User ${updated.name} updated successfully`, 'success');
+      return updated;
+    } catch (err: any) {
+      notify(err.message || 'Failed to update user', 'error');
+      throw err;
+    }
+  };
+
+  const deleteUser = async (id: string): Promise<boolean> => {
+    try {
+      await api.deleteUser(id);
+      await refreshUsers();
+      notify('User deleted successfully', 'success');
+      return true;
+    } catch (err: any) {
+      notify(err.message || 'Failed to delete user profile', 'error');
+      return false;
+    }
+  };
+
+  const toggleUserDelete = async (id: string, targetCanDelete: boolean) => {
+    try {
+      const updated = await api.toggleUserDelete(id, targetCanDelete);
+      await refreshUsers();
+      notify(`Delete permissions for ${updated.name} set to ${targetCanDelete ? 'ENABLED' : 'DISABLED'}`, 'info');
+    } catch (err: any) {
+      notify(err.message || 'Failed to toggle delete permission', 'error');
+    }
+  };
+
+  const isAuthenticated = !!user;
 
   return (
     <AuthContext.Provider
@@ -117,14 +288,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         user,
         isAuthenticated,
         isSuperAdmin,
+        isBranchAdmin,
+        isFacilityUser,
+        canDelete,
+        isImmutableRootAdmin,
+        canAccessModule,
+        hasFacilityAccess,
+        accessibleFacilities,
         login,
         logout,
+        switchUser,
         selectedYear,
         setSelectedYear,
         selectedFacilityId,
         setSelectedFacilityId,
         facilities,
         refreshFacilities,
+        addFacilityJobRole,
+        deleteFacilityJobRole,
+        users,
+        refreshUsers,
+        createUser,
+        updateUser,
+        deleteUser,
+        toggleUserDelete,
         notification,
         notify,
         clearNotification

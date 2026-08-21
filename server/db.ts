@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { 
   Facility, 
+  FacilityJobRole,
   User, 
   EmissionFactorEntry, 
   Scope1VehicleRecord, 
@@ -64,12 +65,19 @@ export const DEFAULT_FACILITIES: Facility[] = [
     type: 'Head Office',
     location: '411 Galle Road, Kollupitiya, Colombo 03',
     responsibleOfficer: 'Mr. Samantha Perera',
+    headDesignation: 'General Manager (Operations & Administration)',
     officerEmail: 'samantha.p@leco.com',
     contactNumber: '+94 11 237 1665',
     electricityAccountNo: 'ACC-010-9882',
     meterNumbers: ['MTR-COL-001', 'MTR-COL-002'],
     hasSolarPV: true,
-    solarCapacityKW: 75.0
+    solarCapacityKW: 75.0,
+    jobRoles: [
+      { id: 'jr-101', facilityId: 'fac-1', roleName: 'Corporate Sustainability Lead', description: 'Oversees GHG Protocol and corporate emission accounting' },
+      { id: 'jr-102', facilityId: 'fac-1', roleName: 'Senior Electrical Engineer', description: 'Engineering design and grid efficiency' },
+      { id: 'jr-103', facilityId: 'fac-1', roleName: 'Administrative Officer', description: 'Fleet, fuel and facility management' },
+      { id: 'jr-104', facilityId: 'fac-1', roleName: 'Environmental Coordinator', description: 'Waste and Scope 3 supplier assessments' }
+    ]
   },
   {
     id: 'fac-2',
@@ -78,12 +86,19 @@ export const DEFAULT_FACILITIES: Facility[] = [
     type: 'Meter Factory',
     location: 'Industrial Zone, Bandaragama, Kalutara',
     responsibleOfficer: 'Eng. Ruwan Jayasuriya',
+    headDesignation: 'Factory Chief Engineer & QA Director',
     officerEmail: 'ruwan.j@leco.com',
     contactNumber: '+94 38 229 4410',
     electricityAccountNo: 'ACC-038-7711',
     meterNumbers: ['MTR-MF-101'],
     hasSolarPV: true,
-    solarCapacityKW: 120.0
+    solarCapacityKW: 120.0,
+    jobRoles: [
+      { id: 'jr-201', facilityId: 'fac-2', roleName: 'Factory Manager', description: 'Assembly line and manufacturing operations' },
+      { id: 'jr-202', facilityId: 'fac-2', roleName: 'Calibration & QA Engineer', description: 'Smart meter accuracy and energy calibration' },
+      { id: 'jr-203', facilityId: 'fac-2', roleName: 'Production Supervisor', description: 'Assembly shift scheduling and fuel monitoring' },
+      { id: 'jr-204', facilityId: 'fac-2', roleName: 'Storekeeper', description: 'Raw materials inventory and waste records' }
+    ]
   },
   {
     id: 'fac-3',
@@ -92,12 +107,19 @@ export const DEFAULT_FACILITIES: Facility[] = [
     type: 'Branch',
     location: '325 Kotte Road, Ethul Kotte',
     responsibleOfficer: 'Mrs. Dilani Senanayake',
+    headDesignation: 'Branch Operations Manager',
     officerEmail: 'dilani.s@leco.com',
     contactNumber: '+94 11 286 5520',
     electricityAccountNo: 'ACC-011-3341',
     meterNumbers: ['MTR-KT-09'],
     hasSolarPV: false,
-    solarCapacityKW: 0.0
+    solarCapacityKW: 0.0,
+    jobRoles: [
+      { id: 'jr-301', facilityId: 'fac-3', roleName: 'Branch Manager', description: 'Overall regional branch lead' },
+      { id: 'jr-302', facilityId: 'fac-3', roleName: 'Customer Service Lead', description: 'Consumer connections and billing inquiries' },
+      { id: 'jr-303', facilityId: 'fac-3', roleName: 'Billing Officer', description: 'Electricity billing and revenue data entry' },
+      { id: 'jr-304', facilityId: 'fac-3', roleName: 'Field Maintenance Engineer', description: 'Local distribution network and fleet' }
+    ]
   },
   {
     id: 'fac-4',
@@ -106,12 +128,19 @@ export const DEFAULT_FACILITIES: Facility[] = [
     type: 'Branch',
     location: 'Galle Road, Rawathawatta, Moratuwa',
     responsibleOfficer: 'Mr. Kusal Fernando',
+    headDesignation: 'Area Electrical Engineer',
     officerEmail: 'kusal.f@leco.com',
     contactNumber: '+94 11 264 5890',
     electricityAccountNo: 'ACC-011-4567',
     meterNumbers: ['MTR-MR-22'],
     hasSolarPV: true,
-    solarCapacityKW: 40.0
+    solarCapacityKW: 40.0,
+    jobRoles: [
+      { id: 'jr-401', facilityId: 'fac-4', roleName: 'Branch Engineer', description: 'Network expansion and maintenance' },
+      { id: 'jr-402', facilityId: 'fac-4', roleName: 'Customer Relations Officer', description: 'Public billing and consumer inquiries' },
+      { id: 'jr-403', facilityId: 'fac-4', roleName: 'Line Maintenance Supervisor', description: 'Overhead cable & transformer upkeep' },
+      { id: 'jr-404', facilityId: 'fac-4', roleName: 'Safety Inspector', description: 'Substation and worker safety oversight' }
+    ]
   },
   {
     id: 'fac-5',
@@ -120,12 +149,18 @@ export const DEFAULT_FACILITIES: Facility[] = [
     type: 'Branch',
     location: 'Main Street, Kalutara North',
     responsibleOfficer: 'Mr. Asanka Weerakkody',
+    headDesignation: 'Branch Superintendent',
     officerEmail: 'asanka.w@leco.com',
     contactNumber: '+94 34 222 3450',
     electricityAccountNo: 'ACC-034-8890',
     meterNumbers: ['MTR-KL-05'],
     hasSolarPV: true,
-    solarCapacityKW: 30.0
+    solarCapacityKW: 30.0,
+    jobRoles: [
+      { id: 'jr-501', facilityId: 'fac-5', roleName: 'Maintenance Superintendent', description: 'Vehicles, generators and facility maintenance' },
+      { id: 'jr-502', facilityId: 'fac-5', roleName: 'Area Billing Officer', description: 'Customer consumption and meter logs' },
+      { id: 'jr-503', facilityId: 'fac-5', roleName: 'Emergency Breakdown Coordinator', description: 'Fast breakdown dispatch operations' }
+    ]
   },
   {
     id: 'fac-6',
@@ -134,12 +169,18 @@ export const DEFAULT_FACILITIES: Facility[] = [
     type: 'Branch',
     location: 'Greens Road, Negombo',
     responsibleOfficer: 'Eng. Priyantha Dissanayake',
+    headDesignation: 'Chief Area Engineer',
     officerEmail: 'priyantha.d@leco.com',
     contactNumber: '+94 31 223 8812',
     electricityAccountNo: 'ACC-031-1029',
     meterNumbers: ['MTR-NG-44'],
     hasSolarPV: true,
-    solarCapacityKW: 50.0
+    solarCapacityKW: 50.0,
+    jobRoles: [
+      { id: 'jr-601', facilityId: 'fac-6', roleName: 'Operations Engineer', description: 'Negombo distribution grid' },
+      { id: 'jr-602', facilityId: 'fac-6', roleName: 'Distribution Substation Officer', description: 'Substation SF6 and transformer logging' },
+      { id: 'jr-603', facilityId: 'fac-6', roleName: 'Technical Services Assistant', description: 'Meter readings and fuel verification' }
+    ]
   },
   {
     id: 'fac-7',
@@ -148,12 +189,18 @@ export const DEFAULT_FACILITIES: Facility[] = [
     type: 'Store',
     location: 'Kotikawatta Road, Colombo',
     responsibleOfficer: 'Mr. Nimal Wickramasinghe',
+    headDesignation: 'Chief Materials Manager',
     officerEmail: 'nimal.w@leco.com',
     contactNumber: '+94 11 257 9901',
     electricityAccountNo: 'ACC-011-8812',
     meterNumbers: ['MTR-ST-01'],
     hasSolarPV: false,
-    solarCapacityKW: 0.0
+    solarCapacityKW: 0.0,
+    jobRoles: [
+      { id: 'jr-701', facilityId: 'fac-7', roleName: 'Chief Logistics Officer', description: 'Bulk freight and supplier shipment handling' },
+      { id: 'jr-702', facilityId: 'fac-7', roleName: 'Inventory Controller', description: 'Transformers, cables and hardware tracking' },
+      { id: 'jr-703', facilityId: 'fac-7', roleName: 'Fleet Coordinator', description: 'Heavy transport logistics & diesel allocation' }
+    ]
   },
   {
     id: 'fac-8',
@@ -162,12 +209,17 @@ export const DEFAULT_FACILITIES: Facility[] = [
     type: 'Training Centre',
     location: 'Old Galle Road, Panadura',
     responsibleOfficer: 'Dr. Janaka Gunaratne',
+    headDesignation: 'Dean of Technical Studies & Safety Training',
     officerEmail: 'janaka.g@leco.com',
     contactNumber: '+94 38 223 1190',
     electricityAccountNo: 'ACC-038-4422',
     meterNumbers: ['MTR-TC-01'],
     hasSolarPV: true,
-    solarCapacityKW: 25.0
+    solarCapacityKW: 25.0,
+    jobRoles: [
+      { id: 'jr-801', facilityId: 'fac-8', roleName: 'Chief Training Instructor', description: 'Curriculum, simulations and labs' },
+      { id: 'jr-802', facilityId: 'fac-8', roleName: 'Technical Standards Auditor', description: 'Safety compliance & emissions certification' }
+    ]
   }
 ];
 
@@ -178,36 +230,69 @@ export const DEFAULT_USERS: User[] = [
     name: 'Super Admin (LECO Sustainability Lead)',
     role: 'super_admin',
     department: 'Corporate Sustainability & Executive Engineering',
+    canDelete: true,
+    isImmutableRootAdmin: true,
+    allowedModules: ['dashboard', 'scope1', 'scope2', 'scope3', 'reports', 'facilities', 'users', 'emission-factors', 'supabase-sql', 'calculator'],
+    isActive: true,
+    contactNumber: '+94 11 237 1600',
     createdAt: new Date().toISOString()
   },
   {
     id: 'usr-2',
-    email: 'samantha.p@leco.com',
-    name: 'Mr. Samantha Perera',
-    role: 'facility_officer',
-    facilityId: 'fac-1',
-    facilityName: 'LECO Head Office',
-    department: 'Head Office Administration',
+    email: 'admin.western@leco.com',
+    name: 'Eng. Janaka Weerasinghe',
+    role: 'branch_admin',
+    assignedFacilityIds: ['fac-1', 'fac-3', 'fac-4'],
+    canDelete: true,
+    allowedModules: ['dashboard', 'scope1', 'scope2', 'scope3', 'reports', 'facilities', 'users', 'calculator'],
+    department: 'Western Province Regional Administration',
+    isActive: true,
+    contactNumber: '+94 11 286 5500',
     createdAt: new Date().toISOString()
   },
   {
     id: 'usr-3',
-    email: 'ruwan.j@leco.com',
-    name: 'Eng. Ruwan Jayasuriya',
-    role: 'facility_officer',
-    facilityId: 'fac-2',
-    facilityName: 'LECO Meter Testing & Assembly Factory',
-    department: 'Meter Manufacturing & QA',
+    email: 'officer.kalutara@leco.com',
+    name: 'Mr. Asanka Weerakkody',
+    role: 'facility_user',
+    facilityId: 'fac-5',
+    facilityName: 'Kalutara Branch & CSC',
+    jobRole: 'Maintenance Superintendent',
+    canDelete: false, // Delete toggle OFF to demonstrate granular delete restriction
+    allowedModules: ['dashboard', 'scope1', 'scope2', 'scope3', 'reports', 'calculator'],
+    department: 'Branch Operations',
+    isActive: true,
+    contactNumber: '+94 34 222 3450',
     createdAt: new Date().toISOString()
   },
   {
     id: 'usr-4',
-    email: 'dilani.s@leco.com',
+    email: 'billing.kotte@leco.com',
     name: 'Mrs. Dilani Senanayake',
-    role: 'facility_officer',
+    role: 'facility_user',
     facilityId: 'fac-3',
-    facilityName: 'Kotte Branch & Operations Centre',
-    department: 'Branch Operations',
+    facilityName: 'Kotte Branch & Customer Service Centre',
+    jobRole: 'Billing Officer',
+    canDelete: true, // Delete toggle ON
+    allowedModules: ['dashboard', 'scope1', 'scope2', 'scope3', 'calculator'],
+    department: 'Customer Billing',
+    isActive: true,
+    contactNumber: '+94 11 286 5520',
+    createdAt: new Date().toISOString()
+  },
+  {
+    id: 'usr-5',
+    email: 'factory.qa@leco.com',
+    name: 'Eng. Ruwan Jayasuriya',
+    role: 'facility_user',
+    facilityId: 'fac-2',
+    facilityName: 'LECO Meter Testing & Assembly Factory',
+    jobRole: 'Calibration & QA Engineer',
+    canDelete: true,
+    allowedModules: ['dashboard', 'scope1', 'scope2', 'scope3', 'reports', 'calculator'],
+    department: 'Meter Manufacturing & QA',
+    isActive: true,
+    contactNumber: '+94 38 229 4410',
     createdAt: new Date().toISOString()
   }
 ];
@@ -946,7 +1031,36 @@ class DatabaseManager {
     try {
       if (fs.existsSync(DATA_FILE)) {
         const raw = fs.readFileSync(DATA_FILE, 'utf-8');
-        return JSON.parse(raw);
+        const parsed = JSON.parse(raw);
+        // Ensure root super admin is always present and immutable
+        if (parsed.users) {
+          const rootAdminIndex = parsed.users.findIndex((u: User) => u.email?.toLowerCase() === 'superadmincf@leco.com');
+          if (rootAdminIndex === -1) {
+            parsed.users.unshift(DEFAULT_USERS[0]);
+          } else {
+            parsed.users[rootAdminIndex] = {
+              ...parsed.users[rootAdminIndex],
+              role: 'super_admin',
+              canDelete: true,
+              isImmutableRootAdmin: true,
+              email: 'superadmincf@leco.com',
+              isActive: true
+            };
+          }
+        }
+        // Ensure facilities have jobRoles array
+        if (parsed.facilities) {
+          parsed.facilities = parsed.facilities.map((fac: Facility) => {
+            if (!fac.jobRoles || fac.jobRoles.length === 0) {
+              const def = DEFAULT_FACILITIES.find(df => df.id === fac.id);
+              if (def && def.jobRoles) {
+                return { ...fac, jobRoles: def.jobRoles, headDesignation: fac.headDesignation || def.headDesignation };
+              }
+            }
+            return fac;
+          });
+        }
+        return parsed;
       }
     } catch (e) {
       console.error('Error loading data from disk, initializing fresh:', e);
@@ -981,6 +1095,9 @@ class DatabaseManager {
   }
 
   public addFacility(facility: Facility): Facility {
+    if (!facility.jobRoles) {
+      facility.jobRoles = [];
+    }
     this.data.facilities.push(facility);
     this.saveData();
     return facility;
@@ -1001,13 +1118,113 @@ class DatabaseManager {
     return this.data.facilities.length < before;
   }
 
-  // Users
+  // Facility Job Roles
+  public addFacilityJobRole(facilityId: string, roleName: string, description?: string): FacilityJobRole | null {
+    const fac = this.data.facilities.find(f => f.id === facilityId);
+    if (!fac) return null;
+    if (!fac.jobRoles) fac.jobRoles = [];
+    const newRole: FacilityJobRole = {
+      id: `jr-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+      facilityId,
+      roleName: roleName.trim(),
+      description: description?.trim() || '',
+      createdAt: new Date().toISOString()
+    };
+    fac.jobRoles.push(newRole);
+    this.saveData();
+    return newRole;
+  }
+
+  public deleteFacilityJobRole(facilityId: string, roleId: string): boolean {
+    const fac = this.data.facilities.find(f => f.id === facilityId);
+    if (!fac || !fac.jobRoles) return false;
+    const before = fac.jobRoles.length;
+    fac.jobRoles = fac.jobRoles.filter(r => r.id !== roleId);
+    this.saveData();
+    return fac.jobRoles.length < before;
+  }
+
+  // Users & RBAC Management
   public getUsers(): User[] {
     return this.data.users;
   }
 
   public addUser(user: User): User {
-    this.data.users.push(user);
+    // Check if email already exists
+    const existing = this.data.users.find(u => u.email.toLowerCase() === user.email.toLowerCase());
+    if (existing) {
+      throw new Error(`User with email ${user.email} already exists`);
+    }
+    const cleanUser: User = {
+      ...user,
+      canDelete: user.canDelete ?? false,
+      isImmutableRootAdmin: false,
+      isActive: user.isActive ?? true,
+      createdAt: user.createdAt || new Date().toISOString()
+    };
+    this.data.users.push(cleanUser);
+    this.saveData();
+    return cleanUser;
+  }
+
+  public updateUser(id: string, updates: Partial<User>): User | null {
+    const idx = this.data.users.findIndex(u => u.id === id);
+    if (idx === -1) return null;
+    const existing = this.data.users[idx];
+
+    // ROOT SUPER ADMIN IMMUTABILITY PROTECTION
+    if (existing.isImmutableRootAdmin || existing.email.toLowerCase() === 'superadmincf@leco.com') {
+      // Prevent changing role, email, active status, or delete permissions for root super admin
+      this.data.users[idx] = {
+        ...existing,
+        name: updates.name || existing.name,
+        contactNumber: updates.contactNumber || existing.contactNumber,
+        department: updates.department || existing.department,
+        role: 'super_admin',
+        email: 'superadmincf@leco.com',
+        canDelete: true,
+        isActive: true,
+        isImmutableRootAdmin: true
+      };
+      this.saveData();
+      return this.data.users[idx];
+    }
+
+    this.data.users[idx] = {
+      ...existing,
+      ...updates,
+      isImmutableRootAdmin: false // Only root user retains this
+    };
+    this.saveData();
+    return this.data.users[idx];
+  }
+
+  public deleteUser(id: string): { success: boolean; message?: string } {
+    const user = this.data.users.find(u => u.id === id);
+    if (!user) {
+      return { success: false, message: 'User not found' };
+    }
+
+    // ROOT SUPER ADMIN IMMUTABILITY PROTECTION
+    if (user.isImmutableRootAdmin || user.email.toLowerCase() === 'superadmincf@leco.com') {
+      return { 
+        success: false, 
+        message: 'Security Violation: Root Super Admin profile (superadmincf@leco.com) is permanently immutable and cannot be deleted.' 
+      };
+    }
+
+    this.data.users = this.data.users.filter(u => u.id !== id);
+    this.saveData();
+    return { success: true };
+  }
+
+  public toggleUserDeletePermission(id: string, canDelete: boolean): User | null {
+    const user = this.data.users.find(u => u.id === id);
+    if (!user) return null;
+    if (user.isImmutableRootAdmin || user.email.toLowerCase() === 'superadmincf@leco.com') {
+      return user; // Super Admin delete permission is always true
+    }
+    user.canDelete = canDelete;
     this.saveData();
     return user;
   }

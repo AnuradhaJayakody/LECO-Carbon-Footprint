@@ -41,7 +41,7 @@ const MONTHS: ReportingMonth[] = [
 ];
 
 export const Scope3Section: React.FC = () => {
-  const { selectedYear, selectedFacilityId, facilities, notify } = useAuth();
+  const { selectedYear, selectedFacilityId, facilities, accessibleFacilities, canDelete, notify } = useAuth();
   const [activeSubTab, setActiveSubTab] = useState<Scope3Tab>('goods');
   const [loading, setLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -344,6 +344,10 @@ export const Scope3Section: React.FC = () => {
   };
 
   const handleDelete = async (id: string) => {
+    if (!canDelete) {
+      notify('Delete capability is disabled for your user profile.', 'error');
+      return;
+    }
     if (!window.confirm('Delete this record?')) return;
     try {
       if (activeSubTab === 'goods') await api.deleteScope3Goods(id);
@@ -842,7 +846,7 @@ export const Scope3Section: React.FC = () => {
                     onChange={(e) => setFacilityId(e.target.value)}
                     className="w-full p-2 bg-slate-50 border border-slate-200 rounded-xl"
                   >
-                    {facilities.map((f) => (
+                    {accessibleFacilities.map((f) => (
                       <option key={f.id} value={f.id}>{f.name} ({f.type})</option>
                     ))}
                   </select>

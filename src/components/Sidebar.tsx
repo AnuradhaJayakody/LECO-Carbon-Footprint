@@ -9,10 +9,11 @@ import {
   Sliders, 
   Database, 
   Calculator,
-  Car,
-  CheckCircle2,
-  ChevronRight,
-  Sparkles
+  Users,
+  Shield,
+  ShieldCheck,
+  Lock,
+  Trash2
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
@@ -23,6 +24,7 @@ export type TabKey =
   | 'scope3'
   | 'reports'
   | 'facilities'
+  | 'users'
   | 'emission-factors'
   | 'supabase-sql'
   | 'calculator';
@@ -40,65 +42,69 @@ export const Sidebar: React.FC<SidebarProps> = ({
   isOpenMobile,
   onCloseMobile
 }) => {
-  const { isSuperAdmin } = useAuth();
+  const { user, isSuperAdmin, isBranchAdmin, canDelete, canAccessModule } = useAuth();
 
-  const navItems = [
+  const allNavItems = [
     {
       id: 'dashboard' as TabKey,
       label: 'Executive Dashboard',
       subtitle: 'Corporate GHG overview & KPIs',
       icon: LayoutDashboard,
-      badge: 'Real-time'
+      badge: 'Live'
     },
     {
       id: 'scope1' as TabKey,
       label: 'Scope 1 Direct',
       subtitle: 'Vehicles, Gens, LPG, Ref, SF6',
       icon: Flame,
-      color: 'text-amber-500',
-      bgColor: 'bg-amber-500/10'
+      color: 'text-amber-400'
     },
     {
       id: 'scope2' as TabKey,
-      label: 'Scope 2 Indirect',
+      label: 'Scope 2 Clean & Grid',
       subtitle: 'Electricity bills & Solar PV',
       icon: Zap,
-      color: 'text-sky-500',
-      bgColor: 'bg-sky-500/10'
+      color: 'text-sky-400'
     },
     {
       id: 'scope3' as TabKey,
       label: 'Scope 3 Value Chain',
       subtitle: 'Goods, Freight, Waste, T&D Loss',
       icon: Layers,
-      color: 'text-emerald-500',
-      bgColor: 'bg-emerald-500/10'
+      color: 'text-emerald-400'
     },
     {
       id: 'reports' as TabKey,
       label: 'GHG Audit Reports',
       subtitle: 'ISO 14064 & PDF/Excel Export',
       icon: FileSpreadsheet,
-      badge: 'Audit Ready'
+      badge: 'ISO 14064'
+    },
+    {
+      id: 'facilities' as TabKey,
+      label: 'Facilities Directory',
+      subtitle: 'Branches, CSCs & Factory directory',
+      icon: Building2
+    },
+    {
+      id: 'users' as TabKey,
+      label: 'User Management',
+      subtitle: 'RBAC Roles, Branches & Delete Permissions',
+      icon: Users,
+      badge: isSuperAdmin ? 'Admin' : 'RBAC'
+    },
+    {
+      id: 'emission-factors' as TabKey,
+      label: 'Emission Factors',
+      subtitle: 'GWP & Grid factor settings',
+      icon: Sliders,
+      adminOnly: true
     },
     {
       id: 'calculator' as TabKey,
       label: 'Quick Sandbox Calc',
       subtitle: 'Instant activity conversions',
       icon: Calculator
-    },
-    {
-      id: 'facilities' as TabKey,
-      label: 'LECO Facilities',
-      subtitle: 'Branches, CSCs & Factory directory',
-      icon: Building2
-    },
-    {
-      id: 'emission-factors' as TabKey,
-      label: 'Emission Factors Library',
-      subtitle: 'GWP & Grid factor settings',
-      icon: Sliders,
-      adminOnly: true
     },
     {
       id: 'supabase-sql' as TabKey,
@@ -108,10 +114,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
     }
   ];
 
+  // Filter items based on user access permissions
+  const navItems = allNavItems.filter(item => {
+    if (isSuperAdmin) return true;
+    if (item.adminOnly && !isSuperAdmin) return false;
+    return canAccessModule(item.id);
+  });
+
   const handleSelect = (tab: TabKey) => {
     setActiveTab(tab);
     onCloseMobile();
   };
+
+  const roleBadgeLabel = isSuperAdmin
+    ? 'Super Admin'
+    : isBranchAdmin
+    ? 'Branch Admin'
+    : 'Facility User';
 
   return (
     <>
@@ -130,17 +149,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
         }`}
       >
         {/* Brand Header */}
-        <div className="p-6 border-b border-emerald-800/60">
+        <div className="p-5 border-b border-emerald-800/60">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 bg-emerald-400 rounded-lg flex items-center justify-center font-black text-[#064E3B] text-base shadow-sm">
               L
             </div>
             <div>
-              <span className="text-xl font-bold tracking-tight text-white block leading-none">
+              <span className="text-lg font-bold tracking-tight text-white block leading-none">
                 LECO
               </span>
-              <span className="text-[10px] text-emerald-200/60 font-medium tracking-wide">
-                Carbon Registry
+              <span className="text-[10px] text-emerald-200/70 font-medium tracking-wide">
+                GHG Protocol Registry
               </span>
             </div>
           </div>
@@ -155,15 +174,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
             return (
               <button
                 key={item.id}
+                id={`sidebar-nav-${item.id}`}
                 onClick={() => handleSelect(item.id)}
-                className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-left transition-colors text-xs ${
+                className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-left transition-colors text-xs cursor-pointer ${
                   isActive
-                    ? 'bg-emerald-800/50 text-white font-semibold border border-emerald-700/50 shadow-sm'
-                    : 'text-emerald-100/70 hover:bg-emerald-800/30 hover:text-white font-medium'
+                    ? 'bg-emerald-800/60 text-white font-semibold border border-emerald-700/60 shadow-sm'
+                    : 'text-emerald-100/75 hover:bg-emerald-800/30 hover:text-white font-medium'
                 }`}
               >
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="w-5 h-5 flex items-center justify-center opacity-80 shrink-0">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="w-5 h-5 flex items-center justify-center shrink-0">
                     <Icon className={`w-4 h-4 ${isActive ? 'text-emerald-300' : 'text-emerald-200/70'}`} />
                   </div>
                   <span className="truncate">{item.label}</span>
@@ -185,20 +205,56 @@ export const Sidebar: React.FC<SidebarProps> = ({
           })}
         </nav>
 
-        {/* Footer User Profile Card */}
-        <div className="p-4 border-t border-emerald-800">
-          <div className="flex items-center gap-3 px-2 py-2 rounded-xl bg-emerald-950/40 border border-emerald-800/40">
-            <div className="w-9 h-9 rounded-full bg-emerald-700 flex items-center justify-center text-xs font-bold text-white border border-emerald-500/50 shrink-0">
-              {isSuperAdmin ? 'SA' : 'FO'}
+        {/* Footer User Profile & RBAC Card */}
+        <div className="p-3.5 border-t border-emerald-800/80 bg-emerald-950/40">
+          <div className="p-2.5 rounded-xl bg-emerald-900/40 border border-emerald-800/60 space-y-2">
+            <div className="flex items-center gap-2.5">
+              <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
+                isSuperAdmin
+                  ? 'bg-amber-400 text-slate-900'
+                  : isBranchAdmin
+                  ? 'bg-indigo-400 text-slate-900'
+                  : 'bg-emerald-400 text-[#064E3B]'
+              }`}>
+                {user?.name ? user.name.charAt(0) : 'U'}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-bold text-white truncate">
+                  {user?.name || 'LECO User'}
+                </p>
+                <p className="text-[10px] text-emerald-300/70 truncate font-mono">
+                  {user?.email || 'user@leco.com'}
+                </p>
+              </div>
             </div>
-            <div className="min-w-0 flex-1">
-              <p className="text-xs font-semibold text-white truncate">
-                {isSuperAdmin ? 'Super Admin' : 'Facility Officer'}
-              </p>
-              <p className="text-[10px] text-emerald-300/60 font-mono truncate">
-                {isSuperAdmin ? 'superadmincf@leco.com' : 'officer.kalutara@leco.com'}
-              </p>
+
+            {/* Role & Permissions Badge */}
+            <div className="pt-1.5 border-t border-emerald-800/60 flex items-center justify-between text-[10px]">
+              <span className="px-1.5 py-0.5 rounded bg-emerald-800 text-emerald-100 font-semibold inline-flex items-center space-x-1">
+                {isSuperAdmin ? <Shield className="w-2.5 h-2.5 text-amber-300" /> : <ShieldCheck className="w-2.5 h-2.5 text-emerald-300" />}
+                <span>{roleBadgeLabel}</span>
+              </span>
+
+              <span className={`px-1.5 py-0.5 rounded font-mono font-bold ${
+                canDelete
+                  ? 'bg-emerald-900 text-emerald-200 border border-emerald-700'
+                  : 'bg-rose-950/80 text-rose-300 border border-rose-800/80'
+              }`}>
+                {canDelete ? 'Del: ON' : 'Del: OFF'}
+              </span>
             </div>
+
+            {/* Job Role or Assigned Branch */}
+            {user?.jobRole && (
+              <div className="text-[10px] text-emerald-200/80 truncate">
+                Role: <span className="font-semibold text-white">{user.jobRole}</span>
+              </div>
+            )}
+            {user?.facilityName && !isSuperAdmin && (
+              <div className="text-[10px] text-emerald-200/70 truncate">
+                Branch: <span className="text-emerald-100">{user.facilityName}</span>
+              </div>
+            )}
           </div>
         </div>
       </aside>

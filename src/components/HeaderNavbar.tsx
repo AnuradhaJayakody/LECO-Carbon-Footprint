@@ -43,6 +43,7 @@ export const HeaderNavbar: React.FC<HeaderNavbarProps> = ({
     selectedFacilityId, 
     setSelectedFacilityId, 
     facilities,
+    accessibleFacilities,
     notify
   } = useAuth();
 
@@ -93,8 +94,8 @@ export const HeaderNavbar: React.FC<HeaderNavbarProps> = ({
               onChange={(e) => setSelectedFacilityId(e.target.value)}
               className="bg-transparent text-slate-700 font-semibold text-xs py-0.5 focus:outline-none cursor-pointer max-w-[180px] truncate"
             >
-              <option value="ALL">All Facilities (Consolidated)</option>
-              {facilities.map((fac) => (
+              {isSuperAdmin && <option value="ALL">All Facilities (Consolidated)</option>}
+              {accessibleFacilities.map((fac) => (
                 <option key={fac.id} value={fac.id}>
                   {fac.name}
                 </option>

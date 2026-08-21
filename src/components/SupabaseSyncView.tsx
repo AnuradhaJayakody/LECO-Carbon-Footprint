@@ -34,7 +34,7 @@ export const SupabaseSyncView: React.FC = () => {
 -- 1. Enable Required Extensions
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
--- 2. Facilities & Infrastructure
+-- 2. Facilities & Infrastructure (with Dynamic Job Roles & Head of Branch)
 CREATE TABLE IF NOT EXISTS leco_facilities (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
@@ -45,11 +45,47 @@ CREATE TABLE IF NOT EXISTS leco_facilities (
   staff_count INT DEFAULT 10,
   floor_area_sqft NUMERIC DEFAULT 1000,
   responsible_officer TEXT NOT NULL,
+  responsible_officer_id TEXT,
   electricity_account_no TEXT,
   meter_numbers TEXT[],
   solar_capacity_kw NUMERIC DEFAULT 0,
+  job_roles JSONB DEFAULT '[]'::jsonb,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- 2.1 Role-Based Access Control & Users Table
+CREATE TABLE IF NOT EXISTS leco_users (
+  id TEXT PRIMARY KEY,
+  email TEXT UNIQUE NOT NULL,
+  name TEXT NOT NULL,
+  role TEXT NOT NULL CHECK (role IN ('super_admin', 'branch_admin', 'facility_user', 'facility_officer')),
+  facility_id TEXT REFERENCES leco_facilities(id) ON DELETE SET NULL,
+  facility_name TEXT,
+  assigned_facility_ids TEXT[] DEFAULT ARRAY[]::TEXT[],
+  job_role TEXT,
+  department TEXT,
+  contact_number TEXT,
+  can_delete BOOLEAN DEFAULT false,
+  allowed_modules TEXT[] DEFAULT ARRAY['dashboard', 'scope1', 'scope2', 'scope3', 'reports', 'calculator']::TEXT[],
+  is_immutable_root_admin BOOLEAN DEFAULT false,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Protect Root Super Admin at Database Level
+CREATE OR REPLACE FUNCTION protect_immutable_root_admin()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF OLD.email = 'superadmincf@leco.com' OR OLD.is_immutable_root_admin = true THEN
+    RAISE EXCEPTION 'Security Exception: Root Super Admin profile (superadmincf@leco.com) is immutable and cannot be modified or deleted.';
+  END IF;
+  RETURN OLD;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_protect_root_admin ON leco_users;
+CREATE TRIGGER trg_protect_root_admin
+BEFORE DELETE OR UPDATE ON leco_users
+FOR EACH ROW EXECUTE FUNCTION protect_immutable_root_admin();
 
 -- 3. Scope 1: Vehicle Fuel Consumption
 CREATE TABLE IF NOT EXISTS leco_scope1_vehicles (
