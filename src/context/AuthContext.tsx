@@ -136,13 +136,38 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const login = async (email: string, password?: string) => {
     try {
+      // 1. Try Supabase Auth in background / parallel if available
+      try {
+        if (isSupabaseConfigured && supabase) {
+          await signInWithSupabaseAuth(email, password).catch((e) => {
+            console.log('Supabase direct auth info (fallback to backend database session):', e?.message || e);
+          });
+        }
+      } catch (sbErr) {
+        console.warn('Supabase auth attempt:', sbErr);
+      }
+
+      // 2. Fetch full RBAC profile and verified session
       const res = await api.login(email, password);
-      setUser(res.user);
-      localStorage.setItem(LOCAL_STORAGE_USER_KEY, JSON.stringify(res.user));
-      const roleLabel = res.user.role === 'super_admin' ? 'Super Admin' : res.user.role === 'branch_admin' ? 'Branch Admin' : 'Facility Officer';
-      notify(`Welcome back, ${res.user.name}! Signed in as ${roleLabel}.`, 'success');
+      const loggedUser = res.user;
+      setUser(loggedUser);
+      localStorage.setItem(LOCAL_STORAGE_USER_KEY, JSON.stringify(loggedUser));
+
+      // Auto-set the active facility scope based on role
+      if (loggedUser.role === 'facility_user' && loggedUser.facilityId) {
+        setSelectedFacilityId(loggedUser.facilityId);
+      } else if (loggedUser.role === 'branch_admin' && loggedUser.facilityId) {
+        setSelectedFacilityId(loggedUser.facilityId);
+      } else if (loggedUser.role === 'branch_admin' && loggedUser.assignedFacilityIds && loggedUser.assignedFacilityIds.length > 0) {
+        setSelectedFacilityId(loggedUser.assignedFacilityIds[0]);
+      } else if (loggedUser.role === 'super_admin') {
+        // Keep 'ALL' or current
+      }
+
+      const roleLabel = loggedUser.role === 'super_admin' ? 'Super Admin' : loggedUser.role === 'branch_admin' ? 'Branch Admin' : 'Facility User';
+      notify(`Welcome back, ${loggedUser.name}! Signed in as ${roleLabel}.`, 'success');
     } catch (err: any) {
-      notify(err.message || 'Login failed', 'error');
+      notify(err.message || 'Login failed. Please check your credentials.', 'error');
       throw err;
     }
   };
@@ -150,12 +175,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const logout = () => {
     setUser(null);
     localStorage.removeItem(LOCAL_STORAGE_USER_KEY);
+    signOutSupabaseAuth().catch(() => {});
     notify('Logged out successfully', 'info');
   };
 
   const switchUser = (targetUser: User) => {
     setUser(targetUser);
     localStorage.setItem(LOCAL_STORAGE_USER_KEY, JSON.stringify(targetUser));
+    if (targetUser.role === 'facility_user' && targetUser.facilityId) {
+      setSelectedFacilityId(targetUser.facilityId);
+    } else if (targetUser.role === 'branch_admin' && targetUser.facilityId) {
+      setSelectedFacilityId(targetUser.facilityId);
+    } else if (targetUser.role === 'branch_admin' && targetUser.assignedFacilityIds?.length) {
+      setSelectedFacilityId(targetUser.assignedFacilityIds[0]);
+    }
     const roleLabel = targetUser.role === 'super_admin' ? 'Super Admin' : targetUser.role === 'branch_admin' ? 'Branch Admin' : 'Facility User';
     notify(`Switched session to ${targetUser.name} (${roleLabel})`, 'info');
   };
@@ -180,12 +213,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return true;
   };
 
-  // Facility Scope Filtering
+  // Facility Scope Filtering (including child CSCs under assigned parent branches)
   const hasFacilityAccess = (facilityId: string): boolean => {
-    if (!user || facilityId === 'ALL') return true;
+    if (!user || facilityId === 'ALL') return isSuperAdmin;
     if (user.role === 'super_admin') return true;
     if (user.role === 'branch_admin') {
-      return (user.assignedFacilityIds || []).includes(facilityId);
+      const allowedIds = user.assignedFacilityIds || (user.facilityId ? [user.facilityId] : []);
+      if (allowedIds.includes(facilityId)) return true;
+      // Check if target facility is a child CSC of any allowed parent branch
+      const fac = facilities.find(f => f.id === facilityId);
+      if (fac && fac.parentId && allowedIds.includes(fac.parentId)) {
+        return true;
+      }
+      return false;
     }
     return user.facilityId === facilityId;
   };
@@ -195,8 +235,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return facilities;
     }
     if (user.role === 'branch_admin') {
-      const allowedIds = user.assignedFacilityIds || [];
-      return facilities.filter(f => allowedIds.includes(f.id));
+      const allowedIds = user.assignedFacilityIds || (user.facilityId ? [user.facilityId] : []);
+      return facilities.filter(f => {
+        if (allowedIds.includes(f.id)) return true;
+        if (f.parentId && allowedIds.includes(f.parentId)) return true;
+        return false;
+      });
     }
     if (user.facilityId) {
       return facilities.filter(f => f.id === user.facilityId);

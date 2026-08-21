@@ -223,7 +223,10 @@ async function startServer() {
         items = items.filter((i: any) => i.reportingYear === year);
       }
       if (facilityId && facilityId !== 'ALL') {
-        items = items.filter((i: any) => i.facilityId === facilityId);
+        const allFacs = db.getFacilities();
+        const targetIds = [facilityId];
+        allFacs.filter(f => f.parentId === facilityId).forEach(cf => targetIds.push(cf.id));
+        items = items.filter((i: any) => targetIds.includes(i.facilityId));
       }
       res.json(items);
     });

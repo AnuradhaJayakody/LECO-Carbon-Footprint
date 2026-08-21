@@ -12,6 +12,45 @@ export const supabase = (supabaseUrl && supabaseAnonKey)
 export const isSupabaseConfigured = !!supabase;
 export const configuredSupabaseUrl = supabaseUrl;
 
+// Supabase Auth Helpers
+export async function signInWithSupabaseAuth(email: string, password?: string) {
+  if (!supabase) {
+    throw new Error('Supabase client not initialized');
+  }
+  const pwd = password || 'Sadmin@cf369';
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email,
+    password: pwd
+  });
+  if (error) {
+    throw error;
+  }
+  return data;
+}
+
+export async function signUpWithSupabaseAuth(email: string, password?: string, metadata?: any) {
+  if (!supabase) {
+    throw new Error('Supabase client not initialized');
+  }
+  const pwd = password || 'Sadmin@cf369';
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password: pwd,
+    options: {
+      data: metadata
+    }
+  });
+  if (error) {
+    throw error;
+  }
+  return data;
+}
+
+export async function signOutSupabaseAuth() {
+  if (!supabase) return;
+  await supabase.auth.signOut();
+}
+
 export async function testSupabaseConnection(): Promise<{ success: boolean; message: string; error?: any }> {
   if (!supabase) {
     return { success: false, message: 'Supabase client is not initialized.' };

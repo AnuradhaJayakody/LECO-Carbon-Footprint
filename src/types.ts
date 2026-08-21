@@ -37,6 +37,7 @@ export type FacilityType =
   | 'CSC' 
   | 'Store' 
   | 'Training Centre' 
+  | 'Special Centre'
   | 'Meter Factory' 
   | 'Substation'
   | 'Other';
@@ -46,6 +47,9 @@ export interface Facility {
   code: string;
   name: string;
   type: FacilityType;
+  parentId?: string | null; // Parent Branch ID if this is a child CSC
+  parentName?: string; // Display name of parent branch
+  isParent?: boolean; // True if this is a main branch that has child CSCs
   location: string;
   address?: string;
   region?: string;
