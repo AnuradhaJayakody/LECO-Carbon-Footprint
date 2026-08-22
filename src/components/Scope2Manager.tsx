@@ -326,22 +326,22 @@ export const Scope2Manager: React.FC = () => {
 
                     {/* Grid kWh */}
                     <td className="py-3.5 px-4 text-right font-mono font-bold text-slate-900">
-                      {r.gridElectricityKWh.toLocaleString()} kWh
+                      {(r.gridElectricityKWh ?? (r as any).gridConsumptionKWh ?? 0).toLocaleString()} kWh
                     </td>
 
                     {/* Solar kWh */}
                     <td className="py-3.5 px-4 text-right font-mono text-emerald-700">
-                      {r.solarGenerationKWh ? `${r.solarGenerationKWh.toLocaleString()} kWh` : '-'}
+                      {r.solarGenerationKWh ? `${Number(r.solarGenerationKWh).toLocaleString()} kWh` : '-'}
                     </td>
 
                     {/* Gross Emissions */}
                     <td className="py-3.5 px-4 text-right font-mono font-black text-blue-600 bg-blue-50/30">
-                      {r.emissionsTonsCO2e.toFixed(3)}
+                      {(r.emissionsTonsCO2e ?? (r as any).totalEmissionsTonsCO2e ?? 0).toFixed(3)}
                     </td>
 
                     {/* Solar Offset */}
                     <td className="py-3.5 px-4 text-right font-mono font-bold text-emerald-700">
-                      {r.solarOffsetTonsCO2e ? `-${r.solarOffsetTonsCO2e.toFixed(3)}` : '-'}
+                      {r.solarOffsetTonsCO2e ? `-${Number(r.solarOffsetTonsCO2e).toFixed(3)}` : '-'}
                     </td>
 
                     {/* Actions */}

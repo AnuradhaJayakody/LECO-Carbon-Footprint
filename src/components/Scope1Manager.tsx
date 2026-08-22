@@ -346,15 +346,15 @@ export const Scope1Manager: React.FC = () => {
                     {/* Quantity */}
                     <td className="py-3.5 px-4 text-right font-mono">
                       {r.category === 'fugitive_sf6' || r.category === 'fugitive_refrigerant' ? (
-                        <span>{r.leakedKg} kg top-up</span>
+                        <span>{r.leakedKg ?? 0} kg top-up</span>
                       ) : (
-                        <span>{r.quantity.toLocaleString()} {r.unit}</span>
+                        <span>{(r.quantity ?? 0).toLocaleString()} {r.unit}</span>
                       )}
                     </td>
 
                     {/* Emissions */}
                     <td className="py-3.5 px-4 text-right font-mono font-black text-orange-600 bg-orange-50/30">
-                      {r.emissionsTonsCO2e.toFixed(3)}
+                      {(r.emissionsTonsCO2e ?? (r as any).totalEmissionsTonsCO2e ?? 0).toFixed(3)}
                     </td>
 
                     {/* Actions */}

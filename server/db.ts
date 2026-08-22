@@ -922,16 +922,14 @@ export const INITIAL_SCOPE1_RECORDS: Scope1Record[] = [
     id: 's1-101',
     facilityId: 'fac-ho-colombo',
     facilityName: 'LECO Head Office',
-    category: 'Stationary Combustion',
-    sourceDescription: 'Backup Generator Caterpiller 500kVA',
-    fuelTypeOrGas: 'Diesel',
+    category: 'stationary_generator',
+    sourceName: 'Backup Generator Caterpillar 500kVA',
+    fuelType: 'Diesel',
     unit: 'Liters',
     quantity: 1250,
-    emissionFactor: 2.6878,
-    emissionFactorUnit: 'kg CO2e / Liter',
-    totalEmissionsKgCO2e: 3359.75,
-    totalEmissionsTonsCO2e: 3.36,
-    reportingMonth: '01',
+    emissionFactorUsed: 2.6878,
+    emissionsTonsCO2e: 3.36,
+    reportingMonth: 1,
     reportingYear: 2024,
     notes: 'Power backup during scheduled grid maintenance',
     createdBy: 'Samantha Perera',
@@ -941,16 +939,16 @@ export const INITIAL_SCOPE1_RECORDS: Scope1Record[] = [
     id: 's1-102',
     facilityId: 'fac-ho-colombo',
     facilityName: 'LECO Head Office',
-    category: 'Mobile Combustion',
-    sourceDescription: 'Executive and Emergency Fleet (12 vehicles)',
-    fuelTypeOrGas: 'Petrol / Gasoline',
+    category: 'mobile_fleet',
+    sourceName: 'Executive and Emergency Fleet (12 vehicles)',
+    fuelType: 'Petrol / Gasoline',
+    vehicleType: 'Executive Car / Van',
+    vehicleNumber: 'WP-CAD-8812',
     unit: 'Liters',
     quantity: 2400,
-    emissionFactor: 2.3149,
-    emissionFactorUnit: 'kg CO2e / Liter',
-    totalEmissionsKgCO2e: 5555.76,
-    totalEmissionsTonsCO2e: 5.56,
-    reportingMonth: '01',
+    emissionFactorUsed: 2.3149,
+    emissionsTonsCO2e: 5.56,
+    reportingMonth: 1,
     reportingYear: 2024,
     notes: 'Fleet fuel slips verified by Admin Dept',
     createdBy: 'Samantha Perera',
@@ -960,16 +958,16 @@ export const INITIAL_SCOPE1_RECORDS: Scope1Record[] = [
     id: 's1-103',
     facilityId: 'fac-br-kotte',
     facilityName: 'Kotte Branch',
-    category: 'Mobile Combustion',
-    sourceDescription: 'Field Breakdown & Line Inspection Vans (WP-CAD-8812, WP-NA-9021)',
-    fuelTypeOrGas: 'Diesel',
+    category: 'mobile_fleet',
+    sourceName: 'Field Breakdown & Line Inspection Vans',
+    fuelType: 'Diesel',
+    vehicleType: 'Commercial Van',
+    vehicleNumber: 'WP-NA-9021',
     unit: 'Liters',
     quantity: 1850,
-    emissionFactor: 2.6878,
-    emissionFactorUnit: 'kg CO2e / Liter',
-    totalEmissionsKgCO2e: 4972.43,
-    totalEmissionsTonsCO2e: 4.97,
-    reportingMonth: '01',
+    emissionFactorUsed: 2.6878,
+    emissionsTonsCO2e: 4.97,
+    reportingMonth: 1,
     reportingYear: 2024,
     notes: 'Routine service coverage for Kotte, Kolonnawa & Pitakotte CSC zones',
     createdBy: 'Dilani Senanayake',
@@ -979,16 +977,16 @@ export const INITIAL_SCOPE1_RECORDS: Scope1Record[] = [
     id: 's1-104',
     facilityId: 'fac-csc-pitakotte',
     facilityName: 'Pitakotte CSC',
-    category: 'Mobile Combustion',
-    sourceDescription: 'Lineman Inspection Motorbikes (WP-XZ-1102, WP-XZ-1103)',
-    fuelTypeOrGas: 'Petrol / Gasoline',
+    category: 'mobile_fleet',
+    sourceName: 'Lineman Inspection Motorbikes',
+    fuelType: 'Petrol / Gasoline',
+    vehicleType: 'Motorcycle',
+    vehicleNumber: 'WP-XZ-1102',
     unit: 'Liters',
     quantity: 280,
-    emissionFactor: 2.3149,
-    emissionFactorUnit: 'kg CO2e / Liter',
-    totalEmissionsKgCO2e: 648.17,
-    totalEmissionsTonsCO2e: 0.65,
-    reportingMonth: '01',
+    emissionFactorUsed: 2.3149,
+    emissionsTonsCO2e: 0.65,
+    reportingMonth: 1,
     reportingYear: 2024,
     notes: 'Daily meter reading and low voltage breakdown patrol',
     createdBy: 'Sarath Wijesinghe',
@@ -998,16 +996,16 @@ export const INITIAL_SCOPE1_RECORDS: Scope1Record[] = [
     id: 's1-105',
     facilityId: 'fac-br-kelaniya',
     facilityName: 'Kelaniya Branch',
-    category: 'Fugitive Emissions',
-    sourceDescription: 'Substation SF6 Gas Insulated Switchgear Top-up (Unit GIS-KLN-04)',
-    fuelTypeOrGas: 'SF6 Gas',
+    category: 'fugitive_sf6',
+    sourceName: 'Substation SF6 Gas Insulated Switchgear Top-up (Unit GIS-KLN-04)',
+    gasType: 'SF6 Gas',
     unit: 'kg',
     quantity: 1.2,
-    emissionFactor: 22800.0,
-    emissionFactorUnit: 'kg CO2e / kg',
-    totalEmissionsKgCO2e: 27360.0,
-    totalEmissionsTonsCO2e: 27.36,
-    reportingMonth: '02',
+    leakedKg: 1.2,
+    gwp: 22800,
+    emissionFactorUsed: 22800.0,
+    emissionsTonsCO2e: 27.36,
+    reportingMonth: 2,
     reportingYear: 2024,
     notes: 'Annual substation pressure recalibration and seal replacement',
     createdBy: 'Rohan Samarasinghe',
@@ -1022,17 +1020,16 @@ export const INITIAL_SCOPE2_RECORDS: Scope2Record[] = [
     facilityName: 'LECO Head Office',
     accountNumber: 'ACC-010-9882',
     meterNumber: 'MTR-COL-001',
-    gridConsumptionKWh: 42000,
+    gridElectricityKWh: 42000,
     solarGenerationKWh: 9500,
-    solarExportKWh: 1200,
-    netPurchasedKWh: 33700,
-    gridEmissionFactorKgCO2ePerKWh: 0.655,
-    totalEmissionsKgCO2e: 22073.5,
-    totalEmissionsTonsCO2e: 22.07,
-    solarOffsetKgCO2e: 6222.5,
-    reportingMonth: '01',
+    gridEmissionFactor: 0.582,
+    emissionsTonsCO2e: 24.444,
+    solarOffsetTonsCO2e: 5.529,
+    netEmissionsTonsCO2e: 18.915,
+    reportingMonth: 1,
     reportingYear: 2024,
     costLKR: 1850000,
+    notes: 'Main Head Office monthly CEB bill',
     createdBy: 'Samantha Perera',
     createdAt: '2024-01-31T17:00:00Z'
   },
@@ -1042,17 +1039,16 @@ export const INITIAL_SCOPE2_RECORDS: Scope2Record[] = [
     facilityName: 'Kotte Branch',
     accountNumber: 'ACC-011-3341',
     meterNumber: 'MTR-KT-09',
-    gridConsumptionKWh: 14500,
+    gridElectricityKWh: 14500,
     solarGenerationKWh: 4200,
-    solarExportKWh: 600,
-    netPurchasedKWh: 10900,
-    gridEmissionFactorKgCO2ePerKWh: 0.655,
-    totalEmissionsKgCO2e: 7139.5,
-    totalEmissionsTonsCO2e: 7.14,
-    solarOffsetKgCO2e: 2751.0,
-    reportingMonth: '01',
+    gridEmissionFactor: 0.582,
+    emissionsTonsCO2e: 8.439,
+    solarOffsetTonsCO2e: 2.444,
+    netEmissionsTonsCO2e: 5.995,
+    reportingMonth: 1,
     reportingYear: 2024,
     costLKR: 620000,
+    notes: 'Kotte Branch regional center consumption',
     createdBy: 'Dilani Senanayake',
     createdAt: '2024-01-31T17:30:00Z'
   },
@@ -1062,17 +1058,16 @@ export const INITIAL_SCOPE2_RECORDS: Scope2Record[] = [
     facilityName: 'Pitakotte CSC',
     accountNumber: 'ACC-011-3342',
     meterNumber: 'MTR-PKT-01',
-    gridConsumptionKWh: 3200,
+    gridElectricityKWh: 3200,
     solarGenerationKWh: 0,
-    solarExportKWh: 0,
-    netPurchasedKWh: 3200,
-    gridEmissionFactorKgCO2ePerKWh: 0.655,
-    totalEmissionsKgCO2e: 2096.0,
-    totalEmissionsTonsCO2e: 2.10,
-    solarOffsetKgCO2e: 0,
-    reportingMonth: '01',
+    gridEmissionFactor: 0.582,
+    emissionsTonsCO2e: 1.862,
+    solarOffsetTonsCO2e: 0,
+    netEmissionsTonsCO2e: 1.862,
+    reportingMonth: 1,
     reportingYear: 2024,
     costLKR: 176000,
+    notes: 'Customer Service Center electricity log',
     createdBy: 'Sarath Wijesinghe',
     createdAt: '2024-01-31T18:00:00Z'
   },
@@ -1082,17 +1077,16 @@ export const INITIAL_SCOPE2_RECORDS: Scope2Record[] = [
     facilityName: 'Kelaniya Branch',
     accountNumber: 'ACC-011-5511',
     meterNumber: 'MTR-KLN-BR01',
-    gridConsumptionKWh: 18200,
+    gridElectricityKWh: 18200,
     solarGenerationKWh: 5600,
-    solarExportKWh: 800,
-    netPurchasedKWh: 13400,
-    gridEmissionFactorKgCO2ePerKWh: 0.655,
-    totalEmissionsKgCO2e: 8777.0,
-    totalEmissionsTonsCO2e: 8.78,
-    solarOffsetKgCO2e: 3668.0,
-    reportingMonth: '01',
+    gridEmissionFactor: 0.582,
+    emissionsTonsCO2e: 10.592,
+    solarOffsetTonsCO2e: 3.259,
+    netEmissionsTonsCO2e: 7.333,
+    reportingMonth: 1,
     reportingYear: 2024,
     costLKR: 790000,
+    notes: 'Kelaniya branch office & technical wing',
     createdBy: 'Rohan Samarasinghe',
     createdAt: '2024-01-31T18:30:00Z'
   }
@@ -1103,17 +1097,16 @@ export const INITIAL_SCOPE3_RECORDS: Scope3Record[] = [
     id: 's3-101',
     facilityId: 'fac-mf-bandaragama',
     facilityName: 'LECO Meter Testing & Assembly Factory',
-    category: 'Purchased Goods & Services',
-    activityName: 'Smart Meter Electronic Microcontroller Components',
-    activityData: 2500,
+    category: 'purchased_goods',
+    itemName: 'Smart Meter Electronic Microcontroller Components',
+    supplierName: 'Lanka Micro Electronics Ltd',
+    quantity: 2500,
     unit: 'units',
-    emissionFactor: 8.5,
-    emissionFactorUnit: 'kg CO2e / unit',
-    totalEmissionsKgCO2e: 21250.0,
-    totalEmissionsTonsCO2e: 21.25,
-    reportingMonth: '01',
+    emissionFactorUsed: 8.5,
+    emissionsTonsCO2e: 21.25,
+    reportingMonth: 1,
     reportingYear: 2024,
-    methodology: 'Supplier LCA verification & carbon certificate',
+    notes: 'Supplier LCA verification & carbon certificate',
     createdBy: 'Ruwan Jayasuriya',
     createdAt: '2024-01-25T14:00:00Z'
   },
@@ -1121,17 +1114,16 @@ export const INITIAL_SCOPE3_RECORDS: Scope3Record[] = [
     id: 's3-102',
     facilityId: 'fac-st-waskaduwa',
     facilityName: 'Stores - Waskaduwa',
-    category: 'Capital Goods',
-    activityName: 'Procurement of Step-down 33kV/11kV Distribution Transformers',
-    activityData: 12000,
+    category: 'capital_goods',
+    itemName: 'Step-down 33kV/11kV Distribution Transformers',
+    supplierName: 'Lanka Transformers Ltd (LTL)',
+    quantity: 12000,
     unit: 'kg',
-    emissionFactor: 4.2,
-    emissionFactorUnit: 'kg CO2e / kg',
-    totalEmissionsKgCO2e: 50400.0,
-    totalEmissionsTonsCO2e: 50.40,
-    reportingMonth: '02',
+    emissionFactorUsed: 4.2,
+    emissionsTonsCO2e: 50.40,
+    reportingMonth: 2,
     reportingYear: 2024,
-    methodology: 'LECO Transformer Environmental LCA Specification',
+    notes: 'LECO Transformer Environmental LCA Specification',
     createdBy: 'Nimal Wickramasinghe',
     createdAt: '2024-02-18T10:00:00Z'
   },
@@ -1139,17 +1131,16 @@ export const INITIAL_SCOPE3_RECORDS: Scope3Record[] = [
     id: 's3-103',
     facilityId: 'fac-ho-colombo',
     facilityName: 'LECO Head Office',
-    category: 'Employee Commuting',
-    activityName: 'Head Office Staff Daily Commuting (180 employees)',
-    activityData: 72000,
+    category: 'employee_commuting',
+    itemName: 'Head Office Staff Daily Commuting (180 employees)',
+    supplierName: 'Internal Staff Commute Survey',
+    quantity: 72000,
     unit: 'passenger-km',
-    emissionFactor: 0.089,
-    emissionFactorUnit: 'kg CO2e / passenger-km',
-    totalEmissionsKgCO2e: 6408.0,
-    totalEmissionsTonsCO2e: 6.41,
-    reportingMonth: '01',
+    emissionFactorUsed: 0.089,
+    emissionsTonsCO2e: 6.41,
+    reportingMonth: 1,
     reportingYear: 2024,
-    methodology: 'Annual employee transport survey & average distance methodology',
+    notes: 'Annual employee transport survey & average distance methodology',
     createdBy: 'Samantha Perera',
     createdAt: '2024-01-30T16:00:00Z'
   }
@@ -1227,6 +1218,41 @@ class DatabaseStore {
         if (!parsed.scope1) parsed.scope1 = INITIAL_SCOPE1_RECORDS;
         if (!parsed.scope2) parsed.scope2 = INITIAL_SCOPE2_RECORDS;
         if (!parsed.scope3) parsed.scope3 = INITIAL_SCOPE3_RECORDS;
+
+        // Normalize Scope 1
+        parsed.scope1 = parsed.scope1.map((r: any) => ({
+          ...r,
+          reportingMonth: Number(r.reportingMonth) || 1,
+          reportingYear: Number(r.reportingYear) || 2024,
+          quantity: Number(r.quantity) || 0,
+          emissionsTonsCO2e: Number(r.emissionsTonsCO2e ?? r.totalEmissionsTonsCO2e) || 0,
+          sourceName: r.sourceName || r.sourceDescription || 'Combustion Source',
+          fuelType: r.fuelType || r.fuelTypeOrGas || 'Fuel'
+        }));
+
+        // Normalize Scope 2
+        parsed.scope2 = parsed.scope2.map((r: any) => ({
+          ...r,
+          reportingMonth: Number(r.reportingMonth) || 1,
+          reportingYear: Number(r.reportingYear) || 2024,
+          gridElectricityKWh: Number(r.gridElectricityKWh ?? r.gridConsumptionKWh) || 0,
+          solarGenerationKWh: Number(r.solarGenerationKWh) || 0,
+          gridEmissionFactor: Number(r.gridEmissionFactor ?? r.gridEmissionFactorKgCO2ePerKWh) || 0.582,
+          emissionsTonsCO2e: Number(r.emissionsTonsCO2e ?? r.totalEmissionsTonsCO2e) || 0,
+          solarOffsetTonsCO2e: Number(r.solarOffsetTonsCO2e ?? (r.solarOffsetKgCO2e ? r.solarOffsetKgCO2e / 1000 : 0)) || 0,
+          netEmissionsTonsCO2e: Number(r.netEmissionsTonsCO2e ?? Math.max(0, (r.emissionsTonsCO2e ?? r.totalEmissionsTonsCO2e ?? 0) - (r.solarOffsetTonsCO2e ?? 0))) || 0
+        }));
+
+        // Normalize Scope 3
+        parsed.scope3 = parsed.scope3.map((r: any) => ({
+          ...r,
+          reportingMonth: Number(r.reportingMonth) || 1,
+          reportingYear: Number(r.reportingYear) || 2024,
+          itemName: r.itemName || r.activityName || 'Scope 3 Activity',
+          quantity: Number(r.quantity ?? r.activityData) || 0,
+          emissionFactorUsed: Number(r.emissionFactorUsed ?? r.emissionFactor) || 0,
+          emissionsTonsCO2e: Number(r.emissionsTonsCO2e ?? r.totalEmissionsTonsCO2e) || 0
+        }));
 
         return parsed;
       }
@@ -1459,18 +1485,21 @@ class DatabaseStore {
     const s2 = this.data.scope2.filter(filterFn);
     const s3 = this.data.scope3.filter(filterFn);
 
-    const scope1Total = s1.reduce((sum, r) => sum + Number(r.totalEmissionsTonsCO2e || 0), 0);
-    const scope2Total = s2.reduce((sum, r) => sum + Number(r.totalEmissionsTonsCO2e || 0), 0);
-    const scope3Total = s3.reduce((sum, r) => sum + Number(r.totalEmissionsTonsCO2e || 0), 0);
-    const solarOffsetTotal = s2.reduce((sum, r) => sum + Number((r.solarOffsetKgCO2e || 0) / 1000), 0);
+    const scope1Total = s1.reduce((sum, r) => sum + Number(r.emissionsTonsCO2e ?? (r as any).totalEmissionsTonsCO2e ?? 0), 0);
+    const scope2Total = s2.reduce((sum, r) => sum + Number(r.emissionsTonsCO2e ?? (r as any).totalEmissionsTonsCO2e ?? 0), 0);
+    const scope3Total = s3.reduce((sum, r) => sum + Number(r.emissionsTonsCO2e ?? (r as any).totalEmissionsTonsCO2e ?? 0), 0);
+    const solarOffsetTotal = s2.reduce((sum, r) => sum + Number(r.solarOffsetTonsCO2e ?? ((r as any).solarOffsetKgCO2e ? (r as any).solarOffsetKgCO2e / 1000 : 0)), 0);
 
     const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
     const monthlyTrends: MonthlyEmissionTrend[] = monthNames.map((name, i) => {
-      const mStr = String(i + 1).padStart(2, '0');
-      const mS1 = s1.filter(r => r.reportingMonth === mStr).reduce((sum, r) => sum + Number(r.totalEmissionsTonsCO2e || 0), 0);
-      const mS2 = s2.filter(r => r.reportingMonth === mStr).reduce((sum, r) => sum + Number(r.totalEmissionsTonsCO2e || 0), 0);
-      const mS3 = s3.filter(r => r.reportingMonth === mStr).reduce((sum, r) => sum + Number(r.totalEmissionsTonsCO2e || 0), 0);
-      const mSolar = s2.filter(r => r.reportingMonth === mStr).reduce((sum, r) => sum + Number((r.solarOffsetKgCO2e || 0) / 1000), 0);
+      const mNum = i + 1;
+      const mStr = String(mNum).padStart(2, '0');
+      const matchMonth = (r: { reportingMonth: number | string }) => Number(r.reportingMonth) === mNum;
+
+      const mS1 = s1.filter(matchMonth).reduce((sum, r) => sum + Number(r.emissionsTonsCO2e ?? (r as any).totalEmissionsTonsCO2e ?? 0), 0);
+      const mS2 = s2.filter(matchMonth).reduce((sum, r) => sum + Number(r.emissionsTonsCO2e ?? (r as any).totalEmissionsTonsCO2e ?? 0), 0);
+      const mS3 = s3.filter(matchMonth).reduce((sum, r) => sum + Number(r.emissionsTonsCO2e ?? (r as any).totalEmissionsTonsCO2e ?? 0), 0);
+      const mSolar = s2.filter(matchMonth).reduce((sum, r) => sum + Number(r.solarOffsetTonsCO2e ?? ((r as any).solarOffsetKgCO2e ? (r as any).solarOffsetKgCO2e / 1000 : 0)), 0);
 
       return {
         month: mStr,
@@ -1488,9 +1517,9 @@ class DatabaseStore {
       : this.data.facilities;
 
     const facilityStats: FacilityEmissionStat[] = activeFacilities.map(fac => {
-      const facS1 = s1.filter(r => r.facilityId === fac.id).reduce((sum, r) => sum + Number(r.totalEmissionsTonsCO2e || 0), 0);
-      const facS2 = s2.filter(r => r.facilityId === fac.id).reduce((sum, r) => sum + Number(r.totalEmissionsTonsCO2e || 0), 0);
-      const facS3 = s3.filter(r => r.facilityId === fac.id).reduce((sum, r) => sum + Number(r.totalEmissionsTonsCO2e || 0), 0);
+      const facS1 = s1.filter(r => r.facilityId === fac.id).reduce((sum, r) => sum + Number(r.emissionsTonsCO2e ?? (r as any).totalEmissionsTonsCO2e ?? 0), 0);
+      const facS2 = s2.filter(r => r.facilityId === fac.id).reduce((sum, r) => sum + Number(r.emissionsTonsCO2e ?? (r as any).totalEmissionsTonsCO2e ?? 0), 0);
+      const facS3 = s3.filter(r => r.facilityId === fac.id).reduce((sum, r) => sum + Number(r.emissionsTonsCO2e ?? (r as any).totalEmissionsTonsCO2e ?? 0), 0);
 
       return {
         facilityId: fac.id,

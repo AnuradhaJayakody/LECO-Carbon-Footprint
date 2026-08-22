@@ -334,12 +334,12 @@ export const Scope3Manager: React.FC = () => {
 
                     {/* Quantity */}
                     <td className="py-3.5 px-4 text-right font-mono">
-                      {r.quantity.toLocaleString()} {r.unit}
+                      {(r.quantity ?? (r as any).activityData ?? 0).toLocaleString()} {r.unit}
                     </td>
 
                     {/* Emissions */}
                     <td className="py-3.5 px-4 text-right font-mono font-black text-purple-600 bg-purple-50/30">
-                      {r.emissionsTonsCO2e.toFixed(3)}
+                      {(r.emissionsTonsCO2e ?? (r as any).totalEmissionsTonsCO2e ?? 0).toFixed(3)}
                     </td>
 
                     {/* Actions */}
