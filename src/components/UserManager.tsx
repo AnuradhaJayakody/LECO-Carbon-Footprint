@@ -24,7 +24,13 @@ import {
   Shield,
   Layers
 } from 'lucide-react';
-import { isSupabaseConfigured, signUpWithSupabaseAuth } from '../services/supabase';
+import { 
+  supabase, 
+  isSupabaseConfigured, 
+  signUpWithSupabaseAuth, 
+  toUserProfileRow, 
+  fromUserProfileRow 
+} from '../services/supabase';
 
 const ALL_MODULES: { id: AppModule; label: string; desc: string }[] = [
   { id: 'dashboard', label: 'Executive Dashboard', desc: 'Summary metrics & charts' },
@@ -78,6 +84,22 @@ export const UserManager: React.FC = () => {
   const fetchUsers = async () => {
     setLoading(true);
     try {
+      if (supabase) {
+        try {
+          const { data, error } = await supabase
+            .from('user_profiles')
+            .select('*')
+            .order('name', { ascending: true });
+
+          if (!error && data && data.length > 0) {
+            setUsersList(data.map(fromUserProfileRow));
+            setLoading(false);
+            return;
+          }
+        } catch (sbErr) {
+          console.warn('Supabase fetch user_profiles notice:', sbErr);
+        }
+      }
       const data = await api.getUsers();
       setUsersList(data);
     } catch (err) {
@@ -171,10 +193,29 @@ export const UserManager: React.FC = () => {
 
     try {
       if (editingUser) {
+        // Execute Supabase update if client configured
+        if (supabase) {
+          try {
+            const { error: sbErr } = await supabase
+              .from('user_profiles')
+              .update(toUserProfileRow(payload))
+              .eq('id', editingUser.id);
+            if (sbErr) console.warn('Supabase user update notice:', sbErr);
+          } catch (e) {
+            console.warn('Supabase user update error:', e);
+          }
+        }
+
         await api.updateUser(editingUser.id, payload);
         notify(`User profile for "${payload.name}" updated successfully!`, 'success');
       } else {
-        // If Supabase is configured, also register Supabase Auth credentials
+        const newUserId = `usr-${Date.now().toString(36)}`;
+        const newRecord = {
+          ...payload,
+          id: newUserId
+        };
+
+        // If Supabase is configured, also register Supabase Auth credentials & profile
         if (isSupabaseConfigured) {
           try {
             await signUpWithSupabaseAuth(email.trim(), password || 'Sadmin@cf369', {
@@ -187,10 +228,18 @@ export const UserManager: React.FC = () => {
           }
         }
 
-        await api.createUser({
-          ...payload,
-          id: `usr-${Date.now().toString(36)}`
-        });
+        if (supabase) {
+          try {
+            const { error: sbErr } = await supabase
+              .from('user_profiles')
+              .insert([toUserProfileRow(newRecord)]);
+            if (sbErr) console.warn('Supabase user insert notice:', sbErr);
+          } catch (e) {
+            console.warn('Supabase user insert error:', e);
+          }
+        }
+
+        await api.createUser(newRecord);
         notify(`Officer user account "${payload.name}" created successfully!`, 'success');
       }
       setIsModalOpen(false);
@@ -207,6 +256,18 @@ export const UserManager: React.FC = () => {
       return;
     }
     try {
+      if (supabase) {
+        try {
+          const { error: sbErr } = await supabase
+            .from('user_profiles')
+            .delete()
+            .eq('id', id);
+          if (sbErr) console.warn('Supabase user delete notice:', sbErr);
+        } catch (e) {
+          console.warn('Supabase user delete error:', e);
+        }
+      }
+
       await api.deleteUser(id);
       notify('User account deactivated and removed.', 'success');
       setDeleteConfirmId(null);

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { Scope2Record } from '../types';
 import { api } from '../services/api';
+import { supabase, toScope2Row, fromScope2Row } from '../services/supabase';
 import { 
   Zap, 
   Plus, 
@@ -57,6 +58,29 @@ export const Scope2Manager: React.FC = () => {
   const fetchRecords = async () => {
     setLoading(true);
     try {
+      if (supabase) {
+        try {
+          let query = supabase.from('scope2_records').select('*').order('reporting_month', { ascending: true });
+          if (selectedYear) {
+            query = query.eq('reporting_year', selectedYear);
+          }
+          if (selectedFacilityId && selectedFacilityId !== 'ALL') {
+            const allFacs = facilities;
+            const targetIds = [selectedFacilityId];
+            allFacs.filter(f => f.parentId === selectedFacilityId).forEach(cf => targetIds.push(cf.id));
+            query = query.in('facility_id', targetIds);
+          }
+          const { data, error } = await query;
+          if (!error && data) {
+            setRecords(data.map(fromScope2Row));
+            setLoading(false);
+            return;
+          }
+        } catch (sbErr) {
+          console.warn('Supabase fetch Scope2 notice:', sbErr);
+        }
+      }
+
       const data = await api.getScope2(selectedYear, selectedFacilityId);
       setRecords(data);
     } catch (err) {
@@ -151,15 +175,41 @@ export const Scope2Manager: React.FC = () => {
 
     try {
       if (editingRecord) {
+        if (supabase) {
+          try {
+            const { error: sbErr } = await supabase
+              .from('scope2_records')
+              .update(toScope2Row(payload))
+              .eq('id', editingRecord.id);
+            if (sbErr) console.warn('Supabase Scope 2 update notice:', sbErr);
+          } catch (e) {
+            console.warn('Supabase Scope 2 update error:', e);
+          }
+        }
+
         await api.updateScope2(editingRecord.id, payload);
         notify('Scope 2 electricity record updated successfully!', 'success');
       } else {
-        await api.createScope2({
+        const newRecordId = `s2-${Date.now().toString(36)}`;
+        const newRecord = {
           ...payload,
-          id: `s2-${Date.now().toString(36)}`,
+          id: newRecordId,
           createdById: user?.id,
           createdByName: user?.name
-        });
+        };
+
+        if (supabase) {
+          try {
+            const { error: sbErr } = await supabase
+              .from('scope2_records')
+              .insert([toScope2Row(newRecord)]);
+            if (sbErr) console.warn('Supabase Scope 2 insert notice:', sbErr);
+          } catch (e) {
+            console.warn('Supabase Scope 2 insert error:', e);
+          }
+        }
+
+        await api.createScope2(newRecord);
         notify('Scope 2 electricity record logged successfully!', 'success');
       }
       setIsModalOpen(false);
@@ -175,6 +225,18 @@ export const Scope2Manager: React.FC = () => {
       return;
     }
     try {
+      if (supabase) {
+        try {
+          const { error: sbErr } = await supabase
+            .from('scope2_records')
+            .delete()
+            .eq('id', id);
+          if (sbErr) console.warn('Supabase Scope 2 delete notice:', sbErr);
+        } catch (e) {
+          console.warn('Supabase Scope 2 delete error:', e);
+        }
+      }
+
       await api.deleteScope2(id);
       notify('Scope 2 record removed successfully', 'success');
       setDeleteConfirmId(null);

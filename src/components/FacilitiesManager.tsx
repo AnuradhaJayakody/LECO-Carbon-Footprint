@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { Facility, FacilityType, JobRole } from '../types';
 import { api } from '../services/api';
+import { supabase, toFacilityRow } from '../services/supabase';
 import { 
   Building2, 
   Plus, 
@@ -144,13 +145,41 @@ export const FacilitiesManager: React.FC = () => {
 
     try {
       if (editingFacility) {
+        // Execute Supabase update if client configured
+        if (supabase) {
+          try {
+            const { error: sbErr } = await supabase
+              .from('facilities')
+              .update(toFacilityRow(payload))
+              .eq('id', editingFacility.id);
+            if (sbErr) console.warn('Supabase facility update notice:', sbErr);
+          } catch (e) {
+            console.warn('Supabase facility update error:', e);
+          }
+        }
+
         await api.updateFacility(editingFacility.id, payload);
         notify(`Facility "${payload.name}" updated successfully!`, 'success');
       } else {
-        await api.createFacility({
+        const newFacilityId = `fac-${Date.now().toString(36)}`;
+        const newRecord = {
           ...payload,
-          id: `fac-${Date.now().toString(36)}`
-        });
+          id: newFacilityId
+        };
+
+        // Execute Supabase insert if client configured
+        if (supabase) {
+          try {
+            const { error: sbErr } = await supabase
+              .from('facilities')
+              .insert([toFacilityRow(newRecord)]);
+            if (sbErr) console.warn('Supabase facility insert notice:', sbErr);
+          } catch (e) {
+            console.warn('Supabase facility insert error:', e);
+          }
+        }
+
+        await api.createFacility(newRecord);
         notify(`New Facility "${payload.name}" created successfully!`, 'success');
       }
       setIsModalOpen(false);
@@ -166,6 +195,18 @@ export const FacilitiesManager: React.FC = () => {
       return;
     }
     try {
+      if (supabase) {
+        try {
+          const { error: sbErr } = await supabase
+            .from('facilities')
+            .delete()
+            .eq('id', id);
+          if (sbErr) console.warn('Supabase facility delete notice:', sbErr);
+        } catch (e) {
+          console.warn('Supabase facility delete error:', e);
+        }
+      }
+
       await api.deleteFacility(id);
       notify('Facility record removed successfully', 'success');
       setDeleteConfirmId(null);

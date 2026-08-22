@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { Scope3Record, Scope3Category } from '../types';
 import { api } from '../services/api';
+import { supabase, toScope3Row, fromScope3Row } from '../services/supabase';
 import { 
   Network, 
   Plus, 
@@ -59,6 +60,29 @@ export const Scope3Manager: React.FC = () => {
   const fetchRecords = async () => {
     setLoading(true);
     try {
+      if (supabase) {
+        try {
+          let query = supabase.from('scope3_records').select('*').order('reporting_month', { ascending: true });
+          if (selectedYear) {
+            query = query.eq('reporting_year', selectedYear);
+          }
+          if (selectedFacilityId && selectedFacilityId !== 'ALL') {
+            const allFacs = facilities;
+            const targetIds = [selectedFacilityId];
+            allFacs.filter(f => f.parentId === selectedFacilityId).forEach(cf => targetIds.push(cf.id));
+            query = query.in('facility_id', targetIds);
+          }
+          const { data, error } = await query;
+          if (!error && data) {
+            setRecords(data.map(fromScope3Row));
+            setLoading(false);
+            return;
+          }
+        } catch (sbErr) {
+          console.warn('Supabase fetch Scope3 notice:', sbErr);
+        }
+      }
+
       const data = await api.getScope3(selectedYear, selectedFacilityId);
       setRecords(data);
     } catch (err) {
@@ -164,15 +188,41 @@ export const Scope3Manager: React.FC = () => {
 
     try {
       if (editingRecord) {
+        if (supabase) {
+          try {
+            const { error: sbErr } = await supabase
+              .from('scope3_records')
+              .update(toScope3Row(payload))
+              .eq('id', editingRecord.id);
+            if (sbErr) console.warn('Supabase Scope 3 update notice:', sbErr);
+          } catch (e) {
+            console.warn('Supabase Scope 3 update error:', e);
+          }
+        }
+
         await api.updateScope3(editingRecord.id, payload);
         notify('Scope 3 value chain record updated successfully!', 'success');
       } else {
-        await api.createScope3({
+        const newRecordId = `s3-${Date.now().toString(36)}`;
+        const newRecord = {
           ...payload,
-          id: `s3-${Date.now().toString(36)}`,
+          id: newRecordId,
           createdById: user?.id,
           createdByName: user?.name
-        });
+        };
+
+        if (supabase) {
+          try {
+            const { error: sbErr } = await supabase
+              .from('scope3_records')
+              .insert([toScope3Row(newRecord)]);
+            if (sbErr) console.warn('Supabase Scope 3 insert notice:', sbErr);
+          } catch (e) {
+            console.warn('Supabase Scope 3 insert error:', e);
+          }
+        }
+
+        await api.createScope3(newRecord);
         notify('Scope 3 record logged successfully!', 'success');
       }
       setIsModalOpen(false);
@@ -188,6 +238,18 @@ export const Scope3Manager: React.FC = () => {
       return;
     }
     try {
+      if (supabase) {
+        try {
+          const { error: sbErr } = await supabase
+            .from('scope3_records')
+            .delete()
+            .eq('id', id);
+          if (sbErr) console.warn('Supabase Scope 3 delete notice:', sbErr);
+        } catch (e) {
+          console.warn('Supabase Scope 3 delete error:', e);
+        }
+      }
+
       await api.deleteScope3(id);
       notify('Scope 3 record removed successfully', 'success');
       setDeleteConfirmId(null);
