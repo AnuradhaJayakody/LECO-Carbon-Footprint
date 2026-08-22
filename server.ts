@@ -1,323 +1,261 @@
-import express, { Request, Response } from 'express';
+import express from 'express';
+import cors from 'cors';
 import path from 'path';
-import { createServer as createViteServer } from 'vite';
-import { db, DEFAULT_EMISSION_FACTORS } from './server/db.js';
+import { fileURLToPath } from 'url';
+import { db } from './server/db.js';
 
-async function startServer() {
-  const app = express();
-  const PORT = 3000;
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
-  app.use(express.json());
+const app = express();
+const PORT = 3000;
 
-  // Health check
-  app.get('/api/health', (req: Request, res: Response) => {
-    res.json({ status: 'ok', organization: 'LECO', system: 'Carbon Footprint Accounting' });
-  });
+app.use(cors());
+app.use(express.json({ limit: '10mb' }));
 
-  // Auth: Email/Password & Role Check
-  // Super Admin initial credentials: superadmincf@leco.com | Sadmin@cf369
-  app.post('/api/auth/login', (req: Request, res: Response) => {
-    const { email, password } = req.body;
-    if (!email) {
-      return res.status(400).json({ error: 'Email is required' });
-    }
-
-    const cleanEmail = String(email).trim().toLowerCase();
-
-    // Check Super Admin default credentials
-    if (cleanEmail === 'superadmincf@leco.com') {
-      if (password === 'Sadmin@cf369' || password === 'admin' || !password) {
-        const rootAdmin = db.getUsers().find(u => u.email.toLowerCase() === 'superadmincf@leco.com') || {
-          id: 'usr-1',
-          email: 'superadmincf@leco.com',
-          name: 'Super Admin (LECO Sustainability Lead)',
-          role: 'super_admin' as const,
-          canDelete: true,
-          isImmutableRootAdmin: true,
-          allowedModules: ['dashboard', 'scope1', 'scope2', 'scope3', 'reports', 'facilities', 'users', 'emission-factors', 'supabase-sql', 'calculator'],
-          department: 'Corporate Sustainability & Executive Engineering',
-          createdAt: new Date().toISOString()
-        };
-        return res.json({
-          user: rootAdmin,
-          token: 'jwt-super-admin-token'
-        });
-      } else {
-        return res.status(401).json({ error: 'Invalid password for Super Admin' });
-      }
-    }
-
-    // Check other registered users
-    const user = db.getUsers().find(u => u.email.toLowerCase() === cleanEmail);
-    if (user) {
-      return res.json({
-        user,
-        token: `jwt-${user.id}-token`
-      });
-    }
-
-    // Allow quick creation for valid @leco.com domain
-    if (cleanEmail.endsWith('@leco.com')) {
-      const newUser = {
-        id: `usr-${Date.now()}`,
-        email: cleanEmail,
-        name: cleanEmail.split('@')[0].replace('.', ' ').toUpperCase(),
-        role: 'facility_user' as const,
-        facilityId: 'fac-1',
-        facilityName: 'LECO Head Office',
-        canDelete: false,
-        isImmutableRootAdmin: false,
-        allowedModules: ['dashboard', 'scope1', 'scope2', 'scope3', 'calculator'],
-        department: 'Operations',
-        createdAt: new Date().toISOString()
-      };
-      db.addUser(newUser);
-      return res.json({ user: newUser, token: `jwt-${newUser.id}-token` });
-    }
-
-    return res.status(401).json({ error: 'Unauthorized. Only LECO employee emails are permitted.' });
-  });
-
-  // Users endpoint
-  app.get('/api/users', (req: Request, res: Response) => {
-    res.json(db.getUsers());
-  });
-
-  app.post('/api/users', (req: Request, res: Response) => {
-    try {
-      const { email, name, role, facilityId, assignedFacilityIds, jobRole, canDelete, allowedModules, department, contactNumber } = req.body;
-      if (!email || !name) {
-        return res.status(400).json({ error: 'Email and Name are required' });
-      }
-      const fac = facilityId ? db.getFacilities().find(f => f.id === facilityId) : undefined;
-      const newUser = {
-        id: `usr-${Date.now()}`,
-        email: String(email).trim().toLowerCase(),
-        name: String(name).trim(),
-        role: role || 'facility_user',
-        facilityId: role === 'facility_user' ? facilityId : undefined,
-        facilityName: fac?.name,
-        assignedFacilityIds: role === 'branch_admin' ? (assignedFacilityIds || []) : undefined,
-        jobRole: jobRole || undefined,
-        canDelete: Boolean(canDelete),
-        allowedModules: allowedModules || ['dashboard', 'scope1', 'scope2', 'scope3', 'reports', 'calculator'],
-        department,
-        contactNumber,
-        isImmutableRootAdmin: false,
-        isActive: true,
-        createdAt: new Date().toISOString()
-      };
-      const created = db.addUser(newUser);
-      res.json(created);
-    } catch (err: any) {
-      res.status(400).json({ error: err.message || 'Failed to create user' });
-    }
-  });
-
-  app.put('/api/users/:id', (req: Request, res: Response) => {
-    try {
-      const { id } = req.params;
-      const updates = req.body;
-      const updated = db.updateUser(id, updates);
-      if (!updated) {
-        return res.status(404).json({ error: 'User not found' });
-      }
-      res.json(updated);
-    } catch (err: any) {
-      res.status(400).json({ error: err.message || 'Failed to update user' });
-    }
-  });
-
-  app.delete('/api/users/:id', (req: Request, res: Response) => {
-    const { id } = req.params;
-    const result = db.deleteUser(id);
-    if (!result.success) {
-      return res.status(403).json({ error: result.message || 'Cannot delete this user profile.' });
-    }
-    res.json({ success: true });
-  });
-
-  app.put('/api/users/:id/toggle-delete', (req: Request, res: Response) => {
-    const { id } = req.params;
-    const { canDelete } = req.body;
-    const updated = db.toggleUserDeletePermission(id, Boolean(canDelete));
-    if (!updated) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-    res.json(updated);
-  });
-
-  // Facilities
-  app.get('/api/facilities', (req: Request, res: Response) => {
-    res.json(db.getFacilities());
-  });
-
-  app.post('/api/facilities', (req: Request, res: Response) => {
-    const newFac = {
-      id: `fac-${Date.now()}`,
-      jobRoles: [],
-      ...req.body
-    };
-    const saved = db.addFacility(newFac);
-    res.json(saved);
-  });
-
-  app.put('/api/facilities/:id', (req: Request, res: Response) => {
-    const updated = db.updateFacility(req.params.id, req.body);
-    if (!updated) return res.status(404).json({ error: 'Facility not found' });
-    res.json(updated);
-  });
-
-  app.delete('/api/facilities/:id', (req: Request, res: Response) => {
-    const success = db.deleteFacility(req.params.id);
-    res.json({ success });
-  });
-
-  // Facility Job Roles dynamic endpoints
-  app.post('/api/facilities/:facilityId/job-roles', (req: Request, res: Response) => {
-    const { facilityId } = req.params;
-    const { roleName, description } = req.body;
-    if (!roleName) {
-      return res.status(400).json({ error: 'Role name is required' });
-    }
-    const role = db.addFacilityJobRole(facilityId, roleName, description);
-    if (!role) {
-      return res.status(404).json({ error: 'Facility not found' });
-    }
-    res.json(role);
-  });
-
-  app.delete('/api/facilities/:facilityId/job-roles/:roleId', (req: Request, res: Response) => {
-    const { facilityId, roleId } = req.params;
-    const success = db.deleteFacilityJobRole(facilityId, roleId);
-    res.json({ success });
-  });
-
-  // Emission Factors
-  app.get('/api/emission-factors', (req: Request, res: Response) => {
-    res.json(db.getEmissionFactors());
-  });
-
-  app.put('/api/emission-factors/:id', (req: Request, res: Response) => {
-    const { factorKgCO2e } = req.body;
-    const updated = db.updateEmissionFactor(req.params.id, Number(factorKgCO2e));
-    if (!updated) return res.status(404).json({ error: 'Emission factor not found' });
-    res.json(updated);
-  });
-
-  // Analytics & Aggregates
-  app.get('/api/analytics/summary', (req: Request, res: Response) => {
-    const year = req.query.year ? Number(req.query.year) : undefined;
-    const facilityId = req.query.facilityId as string | undefined;
-    const summary = db.getAnalyticsSummary(year, facilityId);
-    res.json(summary);
-  });
-
-  // Generic Scope API Builder
-  function createScopeCrud(routePath: string, collectionKey: any) {
-    app.get(routePath, (req: Request, res: Response) => {
-      const year = req.query.year ? Number(req.query.year) : undefined;
-      const facilityId = req.query.facilityId as string | undefined;
-      let items = db.getCollection(collectionKey);
-      if (year) {
-        items = items.filter((i: any) => i.reportingYear === year);
-      }
-      if (facilityId && facilityId !== 'ALL') {
-        const allFacs = db.getFacilities();
-        const targetIds = [facilityId];
-        allFacs.filter(f => f.parentId === facilityId).forEach(cf => targetIds.push(cf.id));
-        items = items.filter((i: any) => targetIds.includes(i.facilityId));
-      }
-      res.json(items);
-    });
-
-    app.post(routePath, (req: Request, res: Response) => {
-      const item = {
-        id: `rec-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        ...req.body
-      };
-      const saved = db.addToCollection(collectionKey, item);
-      res.json(saved);
-    });
-
-    app.put(`${routePath}/:id`, (req: Request, res: Response) => {
-      const updated = db.updateInCollection(collectionKey, req.params.id, {
-        ...req.body,
-        updatedAt: new Date().toISOString()
-      });
-      if (!updated) return res.status(404).json({ error: 'Record not found' });
-      res.json(updated);
-    });
-
-    app.delete(`${routePath}/:id`, (req: Request, res: Response) => {
-      const success = db.deleteFromCollection(collectionKey, req.params.id);
-      res.json({ success });
-    });
+// 1. Auth Endpoint
+app.post('/api/auth/login', (req, res) => {
+  const { email, password } = req.body;
+  if (!email) {
+    return res.status(400).json({ error: 'Email is required' });
   }
 
-  // Scope 1 Routes
-  createScopeCrud('/api/scope1/vehicles', 'scope1Vehicles');
-  createScopeCrud('/api/scope1/generators', 'scope1Generators');
-  createScopeCrud('/api/scope1/stationary', 'scope1Stationary');
-  createScopeCrud('/api/scope1/refrigerants', 'scope1Refrigerants');
-  createScopeCrud('/api/scope1/sf6', 'scope1SF6');
+  const users = db.getUsers();
+  const normalizedEmail = email.trim().toLowerCase();
+  const user = users.find(u => u.email.toLowerCase() === normalizedEmail);
 
-  // Scope 2 Routes
-  createScopeCrud('/api/scope2/electricity', 'scope2Electricity');
-  createScopeCrud('/api/scope2/solar', 'scope2Solar');
-
-  // Scope 3 Routes
-  createScopeCrud('/api/scope3/goods', 'scope3PurchasedGoods');
-  createScopeCrud('/api/scope3/capital', 'scope3CapitalGoods');
-  createScopeCrud('/api/scope3/construction', 'scope3Construction');
-  createScopeCrud('/api/scope3/freight', 'scope3UpstreamFreight');
-  createScopeCrud('/api/scope3/waste', 'scope3Waste');
-  createScopeCrud('/api/scope3/travel', 'scope3BusinessTravel');
-  createScopeCrud('/api/scope3/distribution-losses', 'scope3DistributionLoss');
-
-  // Admin Backup & Reset
-  app.get('/api/admin/export-all', (req: Request, res: Response) => {
-    res.json(db.getRawData());
-  });
-
-  app.post('/api/admin/reset-database', (req: Request, res: Response) => {
-    const data = db.resetToDefault();
-    res.json({ success: true, message: 'Database reset to initial LECO demo seed', data });
-  });
-
-  // Supabase Configuration Status Check
-  app.get('/api/admin/supabase-status', (req: Request, res: Response) => {
-    const supabaseUrl = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL;
-    const isConfigured = !!(supabaseUrl && (process.env.VITE_SUPABASE_ANON_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY));
-    res.json({
-      configured: isConfigured,
-      url: supabaseUrl || 'Local Persistent Engine (Active)',
-      mode: isConfigured ? 'Remote Supabase Postgres' : 'Hybrid Embedded PostgreSQL Engine'
-    });
-  });
-
-  // Vite middleware or static serving
-  if (process.env.NODE_ENV !== 'production') {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa',
-    });
-    app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (req: Request, res: Response) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
+  if (!user) {
+    return res.status(401).json({ error: 'Invalid email or user not found. Please contact your LECO Corporate Administrator.' });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`LECO Carbon Footprint Server running on http://0.0.0.0:${PORT}`);
-  });
-}
+  if (!user.isActive) {
+    return res.status(403).json({ error: 'This user account has been deactivated. Please contact your LECO Administrator.' });
+  }
 
-startServer().catch(err => {
-  console.error('Failed to start server:', err);
+  // Super Admin password check (can accept default master password)
+  if (normalizedEmail === 'superadmincf@leco.com' && password && password !== 'Sadmin@cf369' && password.length < 4) {
+    return res.status(401).json({ error: 'Invalid password for Super Administrator.' });
+  }
+
+  res.json({
+    success: true,
+    user
+  });
+});
+
+// 2. Facilities Endpoints
+app.get('/api/facilities', (_req, res) => {
+  res.json(db.getFacilities());
+});
+
+app.post('/api/facilities', (req, res) => {
+  const newFac = req.body;
+  if (!newFac.name || !newFac.code) {
+    return res.status(400).json({ error: 'Facility code and name are required' });
+  }
+  const created = db.addFacility(newFac);
+  res.status(201).json(created);
+});
+
+app.put('/api/facilities/:id', (req, res) => {
+  const updated = db.updateFacility(req.params.id, req.body);
+  if (!updated) return res.status(404).json({ error: 'Facility not found' });
+  res.json(updated);
+});
+
+app.delete('/api/facilities/:id', (req, res) => {
+  const success = db.deleteFacility(req.params.id);
+  if (!success) return res.status(404).json({ error: 'Facility not found or cannot be deleted' });
+  res.json({ success: true });
+});
+
+// 3. Users Endpoints (RBAC)
+app.get('/api/users', (_req, res) => {
+  res.json(db.getUsers());
+});
+
+app.post('/api/users', (req, res) => {
+  const newUser = req.body;
+  if (!newUser.email || !newUser.name) {
+    return res.status(400).json({ error: 'User email and name are required' });
+  }
+  const created = db.addUser({
+    ...newUser,
+    id: newUser.id || `usr-${Date.now().toString(36)}`,
+    createdAt: new Date().toISOString()
+  });
+  res.status(201).json(created);
+});
+
+app.put('/api/users/:id', (req, res) => {
+  const updated = db.updateUser(req.params.id, req.body);
+  if (!updated) return res.status(404).json({ error: 'User not found' });
+  res.json(updated);
+});
+
+app.delete('/api/users/:id', (req, res) => {
+  const success = db.deleteUser(req.params.id);
+  if (!success) return res.status(400).json({ error: 'Cannot delete root Super Admin or user not found' });
+  res.json({ success: true });
+});
+
+// 4. Emission Factors Endpoints
+app.get('/api/emission-factors', (_req, res) => {
+  res.json(db.getEmissionFactors());
+});
+
+app.post('/api/emission-factors', (req, res) => {
+  const factor = req.body;
+  const created = db.addEmissionFactor({
+    ...factor,
+    id: factor.id || `ef-${Date.now().toString(36)}`
+  });
+  res.status(201).json(created);
+});
+
+app.put('/api/emission-factors/:id', (req, res) => {
+  const updated = db.updateEmissionFactor(req.params.id, req.body);
+  if (!updated) return res.status(404).json({ error: 'Factor not found' });
+  res.json(updated);
+});
+
+app.delete('/api/emission-factors/:id', (req, res) => {
+  const success = db.deleteEmissionFactor(req.params.id);
+  if (!success) return res.status(404).json({ error: 'Factor not found' });
+  res.json({ success: true });
+});
+
+// 5. Scope 1 Records
+app.get('/api/scope1', (req, res) => {
+  const { year, facilityId } = req.query;
+  let items = db.getScope1();
+  if (year) {
+    items = items.filter(i => i.reportingYear === Number(year));
+  }
+  if (facilityId && facilityId !== 'ALL') {
+    const allFacs = db.getFacilities();
+    const targetIds = [String(facilityId)];
+    allFacs.filter(f => f.parentId === facilityId).forEach(cf => targetIds.push(cf.id));
+    items = items.filter(i => targetIds.includes(i.facilityId));
+  }
+  res.json(items);
+});
+
+app.post('/api/scope1', (req, res) => {
+  const rec = req.body;
+  const created = db.addScope1({
+    ...rec,
+    id: rec.id || `s1-${Date.now().toString(36)}`,
+    createdAt: new Date().toISOString()
+  });
+  res.status(201).json(created);
+});
+
+app.put('/api/scope1/:id', (req, res) => {
+  const updated = db.updateScope1(req.params.id, req.body);
+  if (!updated) return res.status(404).json({ error: 'Record not found' });
+  res.json(updated);
+});
+
+app.delete('/api/scope1/:id', (req, res) => {
+  const success = db.deleteScope1(req.params.id);
+  if (!success) return res.status(404).json({ error: 'Record not found' });
+  res.json({ success: true });
+});
+
+// 6. Scope 2 Records
+app.get('/api/scope2', (req, res) => {
+  const { year, facilityId } = req.query;
+  let items = db.getScope2();
+  if (year) {
+    items = items.filter(i => i.reportingYear === Number(year));
+  }
+  if (facilityId && facilityId !== 'ALL') {
+    const allFacs = db.getFacilities();
+    const targetIds = [String(facilityId)];
+    allFacs.filter(f => f.parentId === facilityId).forEach(cf => targetIds.push(cf.id));
+    items = items.filter(i => targetIds.includes(i.facilityId));
+  }
+  res.json(items);
+});
+
+app.post('/api/scope2', (req, res) => {
+  const rec = req.body;
+  const created = db.addScope2({
+    ...rec,
+    id: rec.id || `s2-${Date.now().toString(36)}`,
+    createdAt: new Date().toISOString()
+  });
+  res.status(201).json(created);
+});
+
+app.put('/api/scope2/:id', (req, res) => {
+  const updated = db.updateScope2(req.params.id, req.body);
+  if (!updated) return res.status(404).json({ error: 'Record not found' });
+  res.json(updated);
+});
+
+app.delete('/api/scope2/:id', (req, res) => {
+  const success = db.deleteScope2(req.params.id);
+  if (!success) return res.status(404).json({ error: 'Record not found' });
+  res.json({ success: true });
+});
+
+// 7. Scope 3 Records
+app.get('/api/scope3', (req, res) => {
+  const { year, facilityId } = req.query;
+  let items = db.getScope3();
+  if (year) {
+    items = items.filter(i => i.reportingYear === Number(year));
+  }
+  if (facilityId && facilityId !== 'ALL') {
+    const allFacs = db.getFacilities();
+    const targetIds = [String(facilityId)];
+    allFacs.filter(f => f.parentId === facilityId).forEach(cf => targetIds.push(cf.id));
+    items = items.filter(i => targetIds.includes(i.facilityId));
+  }
+  res.json(items);
+});
+
+app.post('/api/scope3', (req, res) => {
+  const rec = req.body;
+  const created = db.addScope3({
+    ...rec,
+    id: rec.id || `s3-${Date.now().toString(36)}`,
+    createdAt: new Date().toISOString()
+  });
+  res.status(201).json(created);
+});
+
+app.put('/api/scope3/:id', (req, res) => {
+  const updated = db.updateScope3(req.params.id, req.body);
+  if (!updated) return res.status(404).json({ error: 'Record not found' });
+  res.json(updated);
+});
+
+app.delete('/api/scope3/:id', (req, res) => {
+  const success = db.deleteScope3(req.params.id);
+  if (!success) return res.status(404).json({ error: 'Record not found' });
+  res.json({ success: true });
+});
+
+// 8. Dashboard Analytics Summary
+app.get('/api/dashboard/summary', (req, res) => {
+  const year = req.query.year ? Number(req.query.year) : 2024;
+  const facilityId = req.query.facilityId ? String(req.query.facilityId) : 'ALL';
+  const summary = db.getDashboardSummary(year, facilityId);
+  res.json(summary);
+});
+
+// Serve Static in production
+const distPath = path.join(__dirname, 'dist');
+app.use(express.static(distPath));
+
+app.get('*', (_req, res) => {
+  const indexPath = path.join(distPath, 'index.html');
+  res.sendFile(indexPath);
+});
+
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`LECO Carbon Footprint Server running on port ${PORT}`);
 });

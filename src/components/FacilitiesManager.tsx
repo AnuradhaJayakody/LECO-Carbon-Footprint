@@ -1,24 +1,49 @@
 import React, { useState } from 'react';
-import { 
-  Building2, Plus, Edit2, Trash2, MapPin, Users, Sun, Briefcase, 
-  ShieldCheck, Phone, Mail, UserCheck, X, Check, Search, Filter, Info
-} from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
-import { Facility, FacilityJobRole } from '../types';
+import { Facility, FacilityType, JobRole } from '../types';
 import { api } from '../services/api';
+import { 
+  Building2, 
+  Plus, 
+  Edit3, 
+  Trash2, 
+  Sun, 
+  CheckCircle, 
+  Layers, 
+  Search, 
+  X, 
+  MapPin, 
+  UserCheck, 
+  Mail, 
+  Phone, 
+  FileText,
+  AlertTriangle,
+  ChevronRight,
+  ShieldAlert
+} from 'lucide-react';
 
 export const FacilitiesManager: React.FC = () => {
-  const { facilities, refreshFacilities, isSuperAdmin, notify, addFacilityJobRole, deleteFacilityJobRole } = useAuth();
-  
-  const [showModal, setShowModal] = useState(false);
+  const { 
+    facilities, 
+    refreshFacilities, 
+    isSuperAdmin, 
+    canDelete, 
+    notify,
+    getScopedFacilities
+  } = useAuth();
+
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedTypeFilter, setSelectedTypeFilter] = useState<string>('ALL');
+  const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingFacility, setEditingFacility] = useState<Facility | null>(null);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [filterType, setFilterType] = useState('ALL');
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
   // Form State
-  const [name, setName] = useState('');
   const [code, setCode] = useState('');
-  const [type, setType] = useState<Facility['type']>('Branch');
+  const [name, setName] = useState('');
+  const [type, setType] = useState<FacilityType>('CSC');
+  const [parentId, setParentId] = useState<string>('');
+  const [isParent, setIsParent] = useState(false);
   const [location, setLocation] = useState('');
   const [responsibleOfficer, setResponsibleOfficer] = useState('');
   const [headDesignation, setHeadDesignation] = useState('');
@@ -27,722 +52,685 @@ export const FacilitiesManager: React.FC = () => {
   const [electricityAccountNo, setElectricityAccountNo] = useState('');
   const [hasSolarPV, setHasSolarPV] = useState(false);
   const [solarCapacityKW, setSolarCapacityKW] = useState<number>(0);
-  
-  // Job Roles State inside Modal
-  const [modalJobRoles, setModalJobRoles] = useState<Array<{ id?: string; roleName: string; description?: string }>>([]);
-  const [newJobRoleInput, setNewJobRoleInput] = useState('');
-  const [newJobRoleDesc, setNewJobRoleDesc] = useState('');
+  const [jobRoles, setJobRoles] = useState<JobRole[]>([]);
+  const [newRoleName, setNewRoleName] = useState('');
+  const [newRoleDesc, setNewRoleDesc] = useState('');
 
-  // Quick inline job role addition on a card
-  const [activeFacilityJobRoleModal, setActiveFacilityJobRoleModal] = useState<Facility | null>(null);
-  const [inlineRoleName, setInlineRoleName] = useState('');
-  const [inlineRoleDesc, setInlineRoleDesc] = useState('');
+  const scopedFacilities = getScopedFacilities();
+  const parentBranches = facilities.filter(f => f.type === 'Branch' || f.isParent);
 
-  const handleOpenAdd = () => {
+  const openAddModal = () => {
     setEditingFacility(null);
+    setCode(`LECO-FAC-${Date.now().toString(36).toUpperCase()}`);
     setName('');
-    setCode(`LECO-BR-${String(facilities.length + 1).padStart(2, '0')}`);
-    setType('Branch');
+    setType('CSC');
+    setParentId(parentBranches[0]?.id || '');
+    setIsParent(false);
     setLocation('');
     setResponsibleOfficer('');
-    setHeadDesignation('Branch Operations Manager');
+    setHeadDesignation('Customer Service Lead');
     setOfficerEmail('');
-    setContactNumber('+94 11 ');
+    setContactNumber('+94 ');
     setElectricityAccountNo('');
     setHasSolarPV(false);
     setSolarCapacityKW(0);
-    setModalJobRoles([
-      { roleName: 'Operations Lead', description: 'Facility operations and dispatch' },
-      { roleName: 'Customer Relations Officer', description: 'Customer inquiry and billing management' }
+    setJobRoles([
+      { id: `jr-1`, facilityId: '', roleName: 'Customer Service Lead', description: 'Customer queries and billing' },
+      { id: `jr-2`, facilityId: '', roleName: 'Breakdown Technician', description: 'Emergency fault repairs' }
     ]);
-    setNewJobRoleInput('');
-    setNewJobRoleDesc('');
-    setShowModal(true);
+    setIsModalOpen(true);
   };
 
-  const handleOpenEdit = (fac: Facility) => {
+  const openEditModal = (fac: Facility) => {
     setEditingFacility(fac);
-    setName(fac.name);
     setCode(fac.code);
+    setName(fac.name);
     setType(fac.type);
-    setLocation(fac.location || '');
-    setResponsibleOfficer(fac.responsibleOfficer || '');
+    setParentId(fac.parentId || '');
+    setIsParent(fac.isParent || false);
+    setLocation(fac.location);
+    setResponsibleOfficer(fac.responsibleOfficer);
     setHeadDesignation(fac.headDesignation || '');
-    setOfficerEmail(fac.officerEmail || '');
+    setOfficerEmail(fac.officerEmail);
     setContactNumber(fac.contactNumber || '');
     setElectricityAccountNo(fac.electricityAccountNo || '');
-    setHasSolarPV(Boolean(fac.hasSolarPV || (fac.solarCapacityKW && fac.solarCapacityKW > 0)));
+    setHasSolarPV(fac.hasSolarPV || false);
     setSolarCapacityKW(fac.solarCapacityKW || 0);
-    setModalJobRoles(fac.jobRoles ? [...fac.jobRoles] : []);
-    setNewJobRoleInput('');
-    setNewJobRoleDesc('');
-    setShowModal(true);
+    setJobRoles(fac.jobRoles || []);
+    setIsModalOpen(true);
   };
 
-  const handleAddJobRoleToModal = () => {
-    if (!newJobRoleInput.trim()) return;
-    setModalJobRoles([
-      ...modalJobRoles,
-      {
-        id: `temp-${Date.now()}`,
-        roleName: newJobRoleInput.trim(),
-        description: newJobRoleDesc.trim() || undefined
-      }
-    ]);
-    setNewJobRoleInput('');
-    setNewJobRoleDesc('');
+  const handleAddJobRole = () => {
+    if (!newRoleName.trim()) return;
+    const newRole: JobRole = {
+      id: `jr-${Date.now().toString(36)}`,
+      facilityId: editingFacility ? editingFacility.id : '',
+      roleName: newRoleName.trim(),
+      description: newRoleDesc.trim() || undefined
+    };
+    setJobRoles([...jobRoles, newRole]);
+    setNewRoleName('');
+    setNewRoleDesc('');
   };
 
-  const handleRemoveJobRoleFromModal = (index: number) => {
-    const updated = [...modalJobRoles];
-    updated.splice(index, 1);
-    setModalJobRoles(updated);
+  const handleRemoveJobRole = (id: string) => {
+    setJobRoles(jobRoles.filter(r => r.id !== id));
   };
 
-  const handleDelete = async (id: string, name: string) => {
-    if (!isSuperAdmin) {
-      notify('Super Admin privileges required to remove facilities', 'error');
-      return;
-    }
-    if (facilities.length <= 1) {
-      notify('Cannot delete the last remaining LECO facility', 'error');
-      return;
-    }
-    if (window.confirm(`Are you sure you want to remove facility "${name}"? This action cannot be undone.`)) {
-      try {
-        await api.deleteFacility(id);
-        await refreshFacilities();
-        notify(`Facility "${name}" removed successfully`, 'info');
-      } catch (e: any) {
-        notify(e.message || 'Failed to delete facility', 'error');
-      }
-    }
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSaveFacility = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!name.trim() || !code.trim()) {
-      notify('Facility name and code are required', 'error');
+    if (!code.trim() || !name.trim() || !responsibleOfficer.trim() || !officerEmail.trim()) {
+      notify('Please complete all mandatory facility fields', 'error');
       return;
     }
+
+    const payload: Partial<Facility> = {
+      code: code.trim(),
+      name: name.trim(),
+      type,
+      parentId: type === 'CSC' ? parentId || null : null,
+      parentName: type === 'CSC' ? parentBranches.find(b => b.id === parentId)?.name : undefined,
+      isParent: type === 'Branch' ? true : isParent,
+      location: location.trim(),
+      responsibleOfficer: responsibleOfficer.trim(),
+      headDesignation: headDesignation.trim(),
+      officerEmail: officerEmail.trim().toLowerCase(),
+      contactNumber: contactNumber.trim(),
+      electricityAccountNo: electricityAccountNo.trim(),
+      hasSolarPV,
+      solarCapacityKW: hasSolarPV ? Number(solarCapacityKW) : 0,
+      jobRoles
+    };
 
     try {
-      const facilityPayload: Partial<Facility> = {
-        name: name.trim(),
-        code: code.trim().toUpperCase(),
-        type,
-        location: location.trim(),
-        responsibleOfficer: responsibleOfficer.trim(),
-        headDesignation: headDesignation.trim(),
-        officerEmail: officerEmail.trim().toLowerCase(),
-        contactNumber: contactNumber.trim(),
-        electricityAccountNo: electricityAccountNo.trim(),
-        hasSolarPV,
-        solarCapacityKW: hasSolarPV ? Number(solarCapacityKW) : 0,
-        jobRoles: modalJobRoles.map((jr, idx) => ({
-          id: jr.id || `jr-${Date.now()}-${idx}`,
-          facilityId: editingFacility ? editingFacility.id : '',
-          roleName: jr.roleName,
-          description: jr.description
-        }))
-      };
-
       if (editingFacility) {
-        await api.updateFacility(editingFacility.id, facilityPayload);
-        notify(`Facility "${name}" updated successfully`, 'success');
+        await api.updateFacility(editingFacility.id, payload);
+        notify(`Facility "${payload.name}" updated successfully!`, 'success');
       } else {
-        await api.createFacility(facilityPayload);
-        notify(`New facility "${name}" registered successfully`, 'success');
+        await api.createFacility({
+          ...payload,
+          id: `fac-${Date.now().toString(36)}`
+        });
+        notify(`New Facility "${payload.name}" created successfully!`, 'success');
       }
+      setIsModalOpen(false);
       await refreshFacilities();
-      setShowModal(false);
     } catch (err: any) {
       notify(err.message || 'Failed to save facility', 'error');
     }
   };
 
-  const handleInlineAddJobRole = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!activeFacilityJobRoleModal || !inlineRoleName.trim()) return;
-    await addFacilityJobRole(activeFacilityJobRoleModal.id, inlineRoleName.trim(), inlineRoleDesc.trim());
-    setInlineRoleName('');
-    setInlineRoleDesc('');
+  const handleDeleteFacility = async (id: string) => {
+    if (!canDelete) {
+      notify('You do not have permission to delete facility records.', 'error');
+      return;
+    }
+    try {
+      await api.deleteFacility(id);
+      notify('Facility record removed successfully', 'success');
+      setDeleteConfirmId(null);
+      await refreshFacilities();
+    } catch (err: any) {
+      notify(err.message || 'Could not delete facility', 'error');
+    }
   };
 
-  const handleInlineDeleteJobRole = async (roleId: string) => {
-    if (!activeFacilityJobRoleModal) return;
-    await deleteFacilityJobRole(activeFacilityJobRoleModal.id, roleId);
-  };
-
-  // Filtered facilities
-  const filteredFacilities = facilities.filter(fac => {
-    const matchesSearch = 
-      fac.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      fac.code.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      fac.responsibleOfficer?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      fac.location?.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesType = filterType === 'ALL' || fac.type === filterType;
+  // Filtered List
+  const filteredFacilities = scopedFacilities.filter(f => {
+    const matchesSearch = f.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                          f.code.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                          f.responsibleOfficer.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesType = selectedTypeFilter === 'ALL' || f.type === selectedTypeFilter;
     return matchesSearch && matchesType;
   });
 
-  const totalSolarKW = facilities.reduce((sum, f) => sum + (f.solarCapacityKW || 0), 0);
-  const totalJobRolesCount = facilities.reduce((sum, f) => sum + (f.jobRoles?.length || 0), 0);
-
   return (
     <div className="space-y-6 pb-12">
-      {/* Header & Metrics */}
-      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+      
+      {/* Header */}
+      <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center space-x-2">
-            <span className="p-2 bg-emerald-50 text-emerald-600 rounded-xl border border-emerald-100">
-              <Building2 className="w-5 h-5" />
-            </span>
-            <div>
-              <h1 className="text-lg font-bold text-slate-900">
-                LECO Facility & Branch Management
-              </h1>
-              <p className="text-xs text-slate-500">
-                Manage branch offices, responsible facility heads, and define customized job roles for RBAC assignment
-              </p>
-            </div>
+          <div className="flex items-center gap-2 text-xs font-bold text-blue-700 uppercase tracking-wider">
+            <Building2 className="w-4 h-4" />
+            <span>Operational Boundary & Organizational Hierarchy</span>
           </div>
+          <h1 className="text-2xl font-black text-slate-900 mt-1">
+            LECO Facilities & Customer Service Centres (CSC)
+          </h1>
+          <p className="text-xs text-slate-500 mt-0.5">
+            Manage parent Branches, subordinate CSCs, meter testing plants, and logistics stores according to ISO 14064 operational boundaries.
+          </p>
         </div>
 
         {isSuperAdmin && (
           <button
-            onClick={handleOpenAdd}
-            id="btn-add-facility"
-            className="inline-flex items-center space-x-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs rounded-xl transition shadow-sm cursor-pointer"
+            onClick={openAddModal}
+            className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl shadow-sm transition flex items-center gap-2 shrink-0 cursor-pointer"
           >
             <Plus className="w-4 h-4" />
-            <span>Add New Facility</span>
+            <span>Add New Facility / CSC</span>
           </button>
         )}
       </div>
 
-      {/* Summary KPI Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
-        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-          <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Total Facilities</div>
-          <div className="text-2xl font-bold text-slate-900 mt-1">{facilities.length}</div>
-          <div className="text-[11px] text-slate-400 mt-0.5">Operating locations</div>
-        </div>
-
-        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-          <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Defined Job Roles</div>
-          <div className="text-2xl font-bold text-emerald-700 mt-1">{totalJobRolesCount}</div>
-          <div className="text-[11px] text-slate-400 mt-0.5">RBAC role templates</div>
-        </div>
-
-        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-          <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Solar PV Clean Energy</div>
-          <div className="text-2xl font-bold text-amber-600 mt-1">{totalSolarKW.toFixed(1)} <span className="text-xs font-normal text-slate-500">kWp</span></div>
-          <div className="text-[11px] text-slate-400 mt-0.5">{facilities.filter(f => f.hasSolarPV).length} solar sites</div>
-        </div>
-
-        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-          <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Responsible Heads</div>
-          <div className="text-2xl font-bold text-blue-600 mt-1">{facilities.filter(f => f.responsibleOfficer).length}</div>
-          <div className="text-[11px] text-slate-400 mt-0.5">Assigned Officers in Charge</div>
-        </div>
-      </div>
-
-      {/* Filter & Search Toolbar */}
-      <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm">
+      {/* Filter and Search Bar */}
+      <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-3">
         <div className="relative w-full sm:w-80">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+          <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
           <input
             type="text"
-            placeholder="Search facility name, code, officer..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-9 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            placeholder="Search by name, code, officer..."
+            className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500"
           />
         </div>
 
-        <div className="flex items-center space-x-2 w-full sm:w-auto">
-          <Filter className="w-3.5 h-3.5 text-slate-400" />
-          <span className="text-xs text-slate-500 font-medium">Type:</span>
-          <select
-            value={filterType}
-            onChange={(e) => setFilterType(e.target.value)}
-            className="px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-700 focus:outline-none"
-          >
-            <option value="ALL">All Facility Types</option>
-            <option value="Head Office">Head Office</option>
-            <option value="Branch">Branch</option>
-            <option value="Meter Factory">Meter Factory</option>
-            <option value="Store">Store / Warehouse</option>
-            <option value="Training Centre">Training Centre</option>
-          </select>
+        <div className="flex items-center gap-2 w-full sm:w-auto overflow-x-auto pb-1 sm:pb-0">
+          {['ALL', 'Branch', 'CSC', 'Head Office', 'Store', 'Training Centre', 'Special Centre', 'Meter Factory'].map(t => (
+            <button
+              key={t}
+              onClick={() => setSelectedTypeFilter(t)}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition cursor-pointer ${
+                selectedTypeFilter === t
+                  ? 'bg-slate-900 text-white'
+                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              }`}
+            >
+              {t === 'ALL' ? 'All Types' : t}
+            </button>
+          ))}
         </div>
       </div>
 
-      {/* Facilities Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {filteredFacilities.map((fac) => (
-          <div
-            key={fac.id}
-            id={`facility-card-${fac.id}`}
-            className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm hover:shadow-md transition-all flex flex-col justify-between"
-          >
-            <div>
-              {/* Header */}
-              <div className="flex items-start justify-between gap-2">
-                <div>
-                  <div className="flex items-center space-x-1.5">
-                    <span className="px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-800 border border-emerald-200 text-[10px] font-mono font-bold tracking-wider">
-                      {fac.code}
-                    </span>
-                    <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-700 text-[10px] font-semibold">
+      {/* Facilities Cards Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+        {filteredFacilities.map(fac => {
+          const isChildCSC = fac.type === 'CSC' && fac.parentId;
+          const childCount = facilities.filter(f => f.parentId === fac.id).length;
+
+          return (
+            <div 
+              key={fac.id}
+              className={`bg-white border rounded-2xl p-5 shadow-sm transition flex flex-col justify-between ${
+                fac.isParent ? 'border-blue-300 ring-1 ring-blue-100' : 'border-slate-200'
+              }`}
+            >
+              <div>
+                {/* Badge Top */}
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <span className="text-[10px] font-mono font-bold text-slate-400 uppercase bg-slate-100 px-2 py-0.5 rounded">
+                    {fac.code}
+                  </span>
+                  <div className="flex items-center gap-1.5">
+                    {fac.hasSolarPV && (
+                      <span className="flex items-center gap-1 text-[10px] font-bold bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-full border border-emerald-200">
+                        <Sun className="w-3 h-3" />
+                        {fac.solarCapacityKW} kW Solar
+                      </span>
+                    )}
+                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                      fac.type === 'Branch' ? 'bg-blue-100 text-blue-800' :
+                      fac.type === 'CSC' ? 'bg-amber-100 text-amber-800' :
+                      fac.type === 'Head Office' ? 'bg-purple-100 text-purple-800' :
+                      'bg-slate-100 text-slate-700'
+                    }`}>
                       {fac.type}
                     </span>
                   </div>
-                  <h3 className="text-sm font-bold text-slate-900 mt-2">{fac.name}</h3>
                 </div>
 
-                {isSuperAdmin && (
-                  <div className="flex items-center space-x-1 shrink-0">
+                {/* Facility Name & Parent */}
+                <h3 className="text-base font-bold text-slate-900 tracking-tight">
+                  {fac.name}
+                </h3>
+                {isChildCSC && (
+                  <div className="text-[11px] text-blue-600 font-semibold flex items-center gap-1 mt-0.5">
+                    <span>Subordinate to: {fac.parentName || 'Parent Branch'}</span>
+                  </div>
+                )}
+                {fac.isParent && (
+                  <div className="text-[11px] text-emerald-700 font-semibold flex items-center gap-1 mt-0.5">
+                    <Layers className="w-3 h-3" />
+                    <span>Parent Branch &bull; {childCount} Assigned Customer Service Centres</span>
+                  </div>
+                )}
+
+                {/* Location & Officer Details */}
+                <div className="mt-3 space-y-1.5 text-xs text-slate-600 pt-3 border-t border-slate-100">
+                  <div className="flex items-start gap-2">
+                    <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0 mt-0.5" />
+                    <span className="truncate">{fac.location}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <UserCheck className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                    <span className="font-medium text-slate-800 truncate">{fac.responsibleOfficer}</span>
+                    {fac.headDesignation && <span className="text-slate-400 truncate">({fac.headDesignation})</span>}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Mail className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                    <span className="text-slate-500 font-mono text-[11px] truncate">{fac.officerEmail}</span>
+                  </div>
+                </div>
+
+                {/* Job Roles Chips */}
+                {fac.jobRoles && fac.jobRoles.length > 0 && (
+                  <div className="mt-3 pt-2.5 border-t border-slate-100">
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">
+                      Operational Roles ({fac.jobRoles.length})
+                    </div>
+                    <div className="flex flex-wrap gap-1">
+                      {fac.jobRoles.slice(0, 3).map((r, i) => (
+                        <span key={i} className="text-[10px] bg-slate-100 text-slate-700 px-2 py-0.5 rounded-md font-medium">
+                          {r.roleName}
+                        </span>
+                      ))}
+                      {fac.jobRoles.length > 3 && (
+                        <span className="text-[10px] text-slate-400 font-medium px-1">
+                          +{fac.jobRoles.length - 3} more
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Action Buttons */}
+              <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between">
+                <span className="text-[11px] text-slate-400 font-mono">
+                  Acc: {fac.electricityAccountNo || 'N/A'}
+                </span>
+
+                <div className="flex items-center gap-1.5">
+                  {isSuperAdmin && (
                     <button
-                      onClick={() => handleOpenEdit(fac)}
+                      onClick={() => openEditModal(fac)}
+                      className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition cursor-pointer"
                       title="Edit Facility"
-                      className="p-1.5 text-slate-400 hover:text-emerald-700 hover:bg-emerald-50 rounded-lg transition"
                     >
-                      <Edit2 className="w-3.5 h-3.5" />
+                      <Edit3 className="w-3.5 h-3.5" />
                     </button>
+                  )}
+
+                  {canDelete && isSuperAdmin && (
                     <button
-                      onClick={() => handleDelete(fac.id, fac.name)}
+                      onClick={() => setDeleteConfirmId(fac.id)}
+                      className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition cursor-pointer"
                       title="Delete Facility"
-                      className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
                     </button>
-                  </div>
-                )}
-              </div>
-
-              {/* Responsible Person / Head */}
-              <div className="mt-4 p-3 bg-slate-50/80 rounded-xl border border-slate-100 space-y-1.5">
-                <div className="flex items-center justify-between text-[11px]">
-                  <span className="text-slate-500 flex items-center space-x-1">
-                    <UserCheck className="w-3.5 h-3.5 text-emerald-600" />
-                    <span className="font-semibold text-slate-700">Person Responsible (Head):</span>
-                  </span>
-                </div>
-                <div className="font-bold text-slate-900 text-xs">{fac.responsibleOfficer || 'Not Assigned'}</div>
-                {fac.headDesignation && (
-                  <div className="text-[11px] text-emerald-700 font-medium">{fac.headDesignation}</div>
-                )}
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pt-1 text-[10px] text-slate-500">
-                  {fac.officerEmail && (
-                    <span className="flex items-center space-x-1">
-                      <Mail className="w-3 h-3 text-slate-400" />
-                      <span>{fac.officerEmail}</span>
-                    </span>
-                  )}
-                  {fac.contactNumber && (
-                    <span className="flex items-center space-x-1">
-                      <Phone className="w-3 h-3 text-slate-400" />
-                      <span>{fac.contactNumber}</span>
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              {/* Location & Electricity details */}
-              <div className="space-y-2 mt-3.5 text-xs text-slate-600">
-                <div className="flex items-start space-x-2">
-                  <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0 mt-0.5" />
-                  <span className="truncate text-slate-600">{fac.location || 'Location not specified'}</span>
-                </div>
-
-                <div className="flex items-center justify-between text-[11px] pt-1">
-                  <span className="text-slate-400">Electricity Account:</span>
-                  <span className="font-mono text-slate-800 font-medium">{fac.electricityAccountNo || 'ACC-N/A'}</span>
-                </div>
-              </div>
-
-              {/* Associated Job Roles */}
-              <div className="mt-4 pt-3 border-t border-slate-100">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-[11px] font-bold text-slate-700 flex items-center space-x-1">
-                    <Briefcase className="w-3.5 h-3.5 text-slate-500" />
-                    <span>Facility Job Roles ({fac.jobRoles?.length || 0})</span>
-                  </span>
-                  {isSuperAdmin && (
-                    <button
-                      onClick={() => setActiveFacilityJobRoleModal(fac)}
-                      className="text-[10px] font-semibold text-emerald-600 hover:text-emerald-700 hover:underline"
-                    >
-                      + Manage Roles
-                    </button>
-                  )}
-                </div>
-
-                <div className="flex flex-wrap gap-1.5">
-                  {fac.jobRoles && fac.jobRoles.length > 0 ? (
-                    fac.jobRoles.map((jr) => (
-                      <span
-                        key={jr.id}
-                        title={jr.description || jr.roleName}
-                        className="px-2 py-0.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-medium rounded-md border border-slate-200 transition"
-                      >
-                        {jr.roleName}
-                      </span>
-                    ))
-                  ) : (
-                    <span className="text-[11px] text-slate-400 italic">No job roles defined yet</span>
                   )}
                 </div>
               </div>
             </div>
-
-            {/* Solar Clean Energy Footer */}
-            <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs">
-              <span className="text-slate-500 text-[11px]">Solar PV Clean Energy:</span>
-              {fac.hasSolarPV && fac.solarCapacityKW && fac.solarCapacityKW > 0 ? (
-                <span className="inline-flex items-center space-x-1 font-bold text-amber-600 text-xs">
-                  <Sun className="w-3.5 h-3.5" />
-                  <span>{fac.solarCapacityKW} kWp Installed</span>
-                </span>
-              ) : (
-                <span className="text-slate-400 text-[11px]">No Rooftop Solar</span>
-              )}
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
-      {/* Modal: Create / Edit Facility */}
-      {showModal && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4 overflow-y-auto">
-          <div className="bg-white rounded-2xl max-w-xl w-full p-6 shadow-2xl border border-slate-200 my-8">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-              <div className="flex items-center space-x-2">
-                <Building2 className="w-5 h-5 text-emerald-600" />
-                <h2 className="text-base font-bold text-slate-900">
-                  {editingFacility ? 'Update Facility & Branch Details' : 'Register New Facility / Branch'}
-                </h2>
+      {/* Delete Confirmation Modal */}
+      {deleteConfirmId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 text-center">
+            <div className="w-12 h-12 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center mx-auto mb-3">
+              <ShieldAlert className="w-6 h-6" />
+            </div>
+            <h3 className="text-base font-bold text-slate-900">Confirm Facility Deletion</h3>
+            <p className="text-xs text-slate-500 mt-2">
+              Are you sure you want to remove this facility? Any associated emission records and CSC links will be updated.
+            </p>
+            <div className="mt-5 flex items-center justify-center gap-3">
+              <button
+                onClick={() => setDeleteConfirmId(null)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => handleDeleteFacility(deleteConfirmId)}
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold rounded-xl shadow transition cursor-pointer"
+              >
+                Confirm Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Create / Edit Facility Modal with Fixed Header/Footer and Scrollable Body */}
+      {isModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl w-full max-w-2xl shadow-2xl border border-slate-200 flex flex-col max-h-[90vh] overflow-hidden">
+            
+            {/* Modal Header (Permanently Visible) */}
+            <div className="px-6 py-4 bg-slate-900 text-white flex items-center justify-between shrink-0 border-b border-slate-800">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
+                  <Building2 className="w-4 h-4" />
+                </div>
+                <div>
+                  <h2 className="text-sm font-bold text-white">
+                    {editingFacility ? `Edit Facility: ${editingFacility.name}` : 'Register New LECO Facility / CSC'}
+                  </h2>
+                  <p className="text-[11px] text-slate-400">
+                    Define operational bounds, parent branch hierarchy, and renewable generation assets
+                  </p>
+                </div>
               </div>
               <button
-                onClick={() => setShowModal(false)}
-                className="p-1 text-slate-400 hover:text-slate-700 rounded-lg"
+                onClick={() => setIsModalOpen(false)}
+                className="p-1.5 text-slate-400 hover:text-white rounded-lg transition cursor-pointer"
               >
-                <X className="w-5 h-5" />
+                <X className="w-4 h-4" />
               </button>
             </div>
 
-            <form onSubmit={handleSubmit} className="space-y-4 mt-4 text-xs">
-              {/* Basic Info */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {/* Modal Body (Scrollable Only) */}
+            <form id="facility-form" onSubmit={handleSaveFacility} className="p-6 overflow-y-auto space-y-4 text-xs">
+              
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-slate-700 font-semibold mb-1">Facility Name *</label>
+                  <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">
+                    Facility Code *
+                  </label>
                   <input
                     type="text"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
                     required
-                    placeholder="e.g. Negombo Branch & Operations"
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-700 font-semibold mb-1">Facility Code *</label>
-                  <input
-                    type="text"
                     value={code}
                     onChange={(e) => setCode(e.target.value)}
+                    placeholder="e.g. LECO-BR-KT, LECO-CSC-PKT"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl font-mono text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">
+                    Facility Name *
+                  </label>
+                  <input
+                    type="text"
                     required
-                    placeholder="e.g. LECO-BR-NG"
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-mono focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none uppercase"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="e.g. Kotte Branch, Pitakotte CSC"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   />
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-slate-700 font-semibold mb-1">Facility Type</label>
+                  <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">
+                    Facility Type *
+                  </label>
                   <select
                     value={type}
-                    onChange={(e) => setType(e.target.value as Facility['type'])}
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none"
+                    onChange={(e) => setType(e.target.value as FacilityType)}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   >
-                    <option value="Head Office">Head Office</option>
-                    <option value="Branch">Branch Office / CSC</option>
-                    <option value="Meter Factory">Meter Testing & Assembly Factory</option>
-                    <option value="Store">Central Materials Store</option>
-                    <option value="Training Centre">Technical Training Centre</option>
+                    <option value="Branch">Branch (Regional Hub)</option>
+                    <option value="CSC">Customer Service Centre (CSC)</option>
+                    <option value="Head Office">Corporate Head Office</option>
+                    <option value="Store">Materials & Logistics Depot (Store)</option>
+                    <option value="Training Centre">Training Centre</option>
+                    <option value="Special Centre">Specialised Engineering Centre (SDMC)</option>
+                    <option value="Meter Factory">Meter Assembly & Testing Factory</option>
+                    <option value="Other">Other Substation / Asset</option>
                   </select>
                 </div>
-                <div>
-                  <label className="block text-slate-700 font-semibold mb-1">Location / Address</label>
-                  <input
-                    type="text"
-                    value={location}
-                    onChange={(e) => setLocation(e.target.value)}
-                    placeholder="e.g. Greens Road, Negombo"
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                  />
-                </div>
-              </div>
 
-              {/* Head of Facility (Person Responsible) */}
-              <div className="p-3.5 bg-emerald-50/50 rounded-xl border border-emerald-100 space-y-3">
-                <div className="font-bold text-slate-900 flex items-center space-x-1.5">
-                  <UserCheck className="w-4 h-4 text-emerald-600" />
-                  <span>Person Responsible (Head of Facility)</span>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {type === 'CSC' ? (
                   <div>
-                    <label className="block text-slate-700 font-semibold mb-1">Head of Facility Name</label>
-                    <input
-                      type="text"
-                      value={responsibleOfficer}
-                      onChange={(e) => setResponsibleOfficer(e.target.value)}
-                      placeholder="e.g. Eng. Priyantha Dissanayake"
-                      className="w-full p-2 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-slate-700 font-semibold mb-1">Head Designation / Title</label>
-                    <input
-                      type="text"
-                      value={headDesignation}
-                      onChange={(e) => setHeadDesignation(e.target.value)}
-                      placeholder="e.g. Chief Area Electrical Engineer"
-                      className="w-full p-2 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-slate-700 font-semibold mb-1">Official Email</label>
-                    <input
-                      type="email"
-                      value={officerEmail}
-                      onChange={(e) => setOfficerEmail(e.target.value)}
-                      placeholder="e.g. priyantha.d@leco.com"
-                      className="w-full p-2 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-slate-700 font-semibold mb-1">Contact Phone</label>
-                    <input
-                      type="text"
-                      value={contactNumber}
-                      onChange={(e) => setContactNumber(e.target.value)}
-                      placeholder="+94 31 223 8812"
-                      className="w-full p-2 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Dynamic Job Roles associated with Facility */}
-              <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="font-bold text-slate-900 flex items-center space-x-1.5">
-                    <Briefcase className="w-4 h-4 text-slate-600" />
-                    <span>Associated Job Roles ({modalJobRoles.length})</span>
-                  </div>
-                  <span className="text-[10px] text-slate-500">Available as dropdown roles for users</span>
-                </div>
-
-                {/* Job Role list tags */}
-                <div className="flex flex-wrap gap-1.5 min-h-[32px] p-2 bg-white rounded-lg border border-slate-200">
-                  {modalJobRoles.map((jr, idx) => (
-                    <span
-                      key={idx}
-                      className="inline-flex items-center space-x-1 px-2.5 py-1 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-md text-[11px] font-medium"
+                    <label className="block font-bold text-blue-700 uppercase tracking-wider mb-1">
+                      Subordinate Parent Branch *
+                    </label>
+                    <select
+                      value={parentId}
+                      onChange={(e) => setParentId(e.target.value)}
+                      className="w-full px-3 py-2 bg-blue-50/60 border border-blue-300 rounded-xl text-slate-800 font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500"
                     >
-                      <span>{jr.roleName}</span>
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveJobRoleFromModal(idx)}
-                        className="text-emerald-600 hover:text-rose-600 ml-1"
-                      >
-                        <X className="w-3 h-3" />
-                      </button>
-                    </span>
-                  ))}
-                  {modalJobRoles.length === 0 && (
-                    <span className="text-slate-400 text-xs italic">No roles added yet. Add one below.</span>
-                  )}
-                </div>
+                      <option value="">-- Select Parent Branch --</option>
+                      {parentBranches.map(b => (
+                        <option key={b.id} value={b.id}>
+                          {b.name} ({b.code})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ) : (
+                  <div>
+                    <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">
+                      Branch Hierarchy Type
+                    </label>
+                    <div className="px-3 py-2 bg-slate-100 rounded-xl text-slate-600 flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        id="isParentCheck"
+                        checked={type === 'Branch' || isParent}
+                        onChange={(e) => setIsParent(e.target.checked)}
+                        disabled={type === 'Branch'}
+                        className="rounded text-emerald-600 focus:ring-emerald-500"
+                      />
+                      <label htmlFor="isParentCheck" className="font-semibold text-slate-800 cursor-pointer">
+                        Acts as Regional Parent for CSCs
+                      </label>
+                    </div>
+                  </div>
+                )}
+              </div>
 
-                {/* Add new Job Role row */}
-                <div className="flex flex-col sm:flex-row items-center gap-2 pt-1">
+              <div>
+                <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  Physical Address / Location *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={location}
+                  onChange={(e) => setLocation(e.target.value)}
+                  placeholder="e.g. 325 Kotte Road, Ethul Kotte"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">
+                    Responsible Officer Name *
+                  </label>
                   <input
                     type="text"
-                    placeholder="Job Role Title (e.g. Calibration Engineer)"
-                    value={newJobRoleInput}
-                    onChange={(e) => setNewJobRoleInput(e.target.value)}
-                    className="w-full sm:flex-1 p-2 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                    required
+                    value={responsibleOfficer}
+                    onChange={(e) => setResponsibleOfficer(e.target.value)}
+                    placeholder="e.g. Eng. Dilani Senanayake"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">
+                    Designation / Role Title
+                  </label>
+                  <input
+                    type="text"
+                    value={headDesignation}
+                    onChange={(e) => setHeadDesignation(e.target.value)}
+                    placeholder="e.g. Area Operations Manager"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">
+                    Officer Email Address *
+                  </label>
+                  <input
+                    type="email"
+                    required
+                    value={officerEmail}
+                    onChange={(e) => setOfficerEmail(e.target.value)}
+                    placeholder="officer@leco.com"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl font-mono text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">
+                    Contact Phone Number
+                  </label>
+                  <input
+                    type="text"
+                    value={contactNumber}
+                    onChange={(e) => setContactNumber(e.target.value)}
+                    placeholder="+94 11 286 5520"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+              </div>
+
+              {/* Electricity & Solar PV Attributes */}
+              <div className="p-4 bg-emerald-50/50 border border-emerald-200 rounded-xl space-y-3">
+                <div className="font-bold text-emerald-900 uppercase tracking-wider text-[11px] flex items-center gap-1.5">
+                  <Sun className="w-3.5 h-3.5 text-emerald-600" />
+                  Energy & Renewable Solar PV Configuration
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">
+                      Electricity Account Number
+                    </label>
+                    <input
+                      type="text"
+                      value={electricityAccountNo}
+                      onChange={(e) => setElectricityAccountNo(e.target.value)}
+                      placeholder="e.g. ACC-011-3341"
+                      className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">
+                      Rooftop Solar PV Installed?
+                    </label>
+                    <div className="flex items-center gap-4 mt-2">
+                      <label className="flex items-center gap-1.5 font-semibold text-slate-800 cursor-pointer">
+                        <input
+                          type="radio"
+                          name="solarPvRadio"
+                          checked={hasSolarPV === true}
+                          onChange={() => setHasSolarPV(true)}
+                          className="text-emerald-600 focus:ring-emerald-500"
+                        />
+                        Yes (Grid-tied Solar)
+                      </label>
+                      <label className="flex items-center gap-1.5 font-semibold text-slate-800 cursor-pointer">
+                        <input
+                          type="radio"
+                          name="solarPvRadio"
+                          checked={hasSolarPV === false}
+                          onChange={() => { setHasSolarPV(false); setSolarCapacityKW(0); }}
+                          className="text-emerald-600 focus:ring-emerald-500"
+                        />
+                        No Solar
+                      </label>
+                    </div>
+                  </div>
+                </div>
+
+                {hasSolarPV && (
+                  <div>
+                    <label className="block font-semibold text-slate-700 mb-1">
+                      Solar System Installed Capacity (kWp)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      min="0"
+                      value={solarCapacityKW}
+                      onChange={(e) => setSolarCapacityKW(Number(e.target.value))}
+                      className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 font-mono"
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/* Job Roles Management */}
+              <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3">
+                <div className="font-bold text-slate-700 uppercase tracking-wider text-[11px]">
+                  Facility Job Roles Configuration
+                </div>
+
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <input
+                    type="text"
+                    value={newRoleName}
+                    onChange={(e) => setNewRoleName(e.target.value)}
+                    placeholder="New role title (e.g. Field Lineman Lead)"
+                    className="flex-1 px-3 py-1.5 bg-white border border-slate-300 rounded-xl text-slate-800"
                   />
                   <input
                     type="text"
-                    placeholder="Brief description / scope (optional)"
-                    value={newJobRoleDesc}
-                    onChange={(e) => setNewJobRoleDesc(e.target.value)}
-                    className="w-full sm:flex-1 p-2 bg-white border border-slate-200 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                    value={newRoleDesc}
+                    onChange={(e) => setNewRoleDesc(e.target.value)}
+                    placeholder="Role responsibilities..."
+                    className="flex-1 px-3 py-1.5 bg-white border border-slate-300 rounded-xl text-slate-800"
                   />
                   <button
                     type="button"
-                    onClick={handleAddJobRoleToModal}
-                    className="w-full sm:w-auto px-3.5 py-2 bg-slate-800 hover:bg-slate-900 text-white font-medium rounded-lg shrink-0 transition"
+                    onClick={handleAddJobRole}
+                    className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl font-bold cursor-pointer"
                   >
-                    + Add Role
+                    Add Role
                   </button>
                 </div>
-              </div>
 
-              {/* Electricity & Solar */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-slate-700 font-semibold mb-1">Electricity Account Number</label>
-                  <input
-                    type="text"
-                    value={electricityAccountNo}
-                    onChange={(e) => setElectricityAccountNo(e.target.value)}
-                    placeholder="e.g. ACC-031-1029"
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl font-mono focus:bg-white focus:outline-none"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <div className="flex items-center space-x-2 pt-3">
-                    <input
-                      type="checkbox"
-                      id="hasSolarPV"
-                      checked={hasSolarPV}
-                      onChange={(e) => setHasSolarPV(e.target.checked)}
-                      className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 w-4 h-4 cursor-pointer"
-                    />
-                    <label htmlFor="hasSolarPV" className="font-semibold text-slate-800 cursor-pointer">
-                      Has Rooftop Solar PV Installation
-                    </label>
-                  </div>
-
-                  {hasSolarPV && (
-                    <div>
-                      <input
-                        type="number"
-                        step="0.1"
-                        min="0"
-                        value={solarCapacityKW}
-                        onChange={(e) => setSolarCapacityKW(Number(e.target.value))}
-                        placeholder="Capacity in kWp (e.g. 50)"
-                        className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg font-mono focus:bg-white focus:outline-none"
-                      />
+                <div className="space-y-1.5 max-h-36 overflow-y-auto pt-1">
+                  {jobRoles.map((r) => (
+                    <div key={r.id} className="flex items-center justify-between p-2 bg-white border border-slate-200 rounded-lg text-xs">
+                      <div>
+                        <span className="font-bold text-slate-800">{r.roleName}</span>
+                        {r.description && <span className="text-slate-500 ml-2 text-[11px]">- {r.description}</span>}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveJobRole(r.id)}
+                        className="text-rose-500 hover:text-rose-700 p-1 cursor-pointer"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
                     </div>
-                  )}
+                  ))}
                 </div>
               </div>
 
-              {/* Actions */}
-              <div className="flex items-center justify-end space-x-3 pt-4 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setShowModal(false)}
-                  className="px-4 py-2.5 text-slate-600 hover:bg-slate-100 rounded-xl font-medium"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-xl shadow-sm transition"
-                >
-                  {editingFacility ? 'Save Changes' : 'Create Facility'}
-                </button>
-              </div>
             </form>
-          </div>
-        </div>
-      )}
 
-      {/* Modal: Manage Job Roles for specific facility */}
-      {activeFacilityJobRoleModal && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-              <div>
-                <h3 className="text-base font-bold text-slate-900">
-                  Job Roles: {activeFacilityJobRoleModal.name}
-                </h3>
-                <p className="text-xs text-slate-500">
-                  Define official roles used when provisioning facility-level users
-                </p>
-              </div>
+            {/* Modal Footer (Permanently Visible) */}
+            <div className="px-6 py-4 bg-slate-100 border-t border-slate-200 flex items-center justify-end gap-3 shrink-0">
               <button
-                onClick={() => setActiveFacilityJobRoleModal(null)}
-                className="p-1 text-slate-400 hover:text-slate-700 rounded-lg"
+                type="button"
+                onClick={() => setIsModalOpen(false)}
+                className="px-4 py-2 bg-white hover:bg-slate-200 text-slate-700 font-semibold rounded-xl border border-slate-300 transition cursor-pointer"
               >
-                <X className="w-5 h-5" />
+                Cancel
+              </button>
+              <button
+                type="submit"
+                form="facility-form"
+                className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl shadow transition cursor-pointer"
+              >
+                {editingFacility ? 'Save Changes' : 'Create Facility'}
               </button>
             </div>
 
-            {/* List of existing roles */}
-            <div className="mt-4 space-y-2 max-h-60 overflow-y-auto pr-1">
-              {activeFacilityJobRoleModal.jobRoles && activeFacilityJobRoleModal.jobRoles.length > 0 ? (
-                activeFacilityJobRoleModal.jobRoles.map((jr) => (
-                  <div
-                    key={jr.id}
-                    className="flex items-center justify-between p-2.5 bg-slate-50 rounded-xl border border-slate-200 text-xs"
-                  >
-                    <div>
-                      <div className="font-bold text-slate-900">{jr.roleName}</div>
-                      {jr.description && (
-                        <div className="text-[11px] text-slate-500">{jr.description}</div>
-                      )}
-                    </div>
-                    <button
-                      onClick={() => handleInlineDeleteJobRole(jr.id)}
-                      title="Remove Role"
-                      className="p-1 text-slate-400 hover:text-rose-600 rounded"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                ))
-              ) : (
-                <div className="text-center py-6 text-slate-400 text-xs">
-                  No job roles configured for this branch.
-                </div>
-              )}
-            </div>
-
-            {/* Add new role form */}
-            <form onSubmit={handleInlineAddJobRole} className="mt-4 pt-3 border-t border-slate-100 space-y-2.5 text-xs">
-              <label className="block text-slate-700 font-semibold">Add New Role to Facility</label>
-              <input
-                type="text"
-                placeholder="Role Title (e.g. Senior Calibration Engineer)"
-                value={inlineRoleName}
-                onChange={(e) => setInlineRoleName(e.target.value)}
-                required
-                className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:outline-none"
-              />
-              <input
-                type="text"
-                placeholder="Role responsibilities (optional)"
-                value={inlineRoleDesc}
-                onChange={(e) => setInlineRoleDesc(e.target.value)}
-                className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:outline-none"
-              />
-              <div className="flex justify-end pt-1">
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-xl text-xs shadow-sm"
-                >
-                  Save Job Role
-                </button>
-              </div>
-            </form>
           </div>
         </div>
       )}
+
     </div>
   );
 };

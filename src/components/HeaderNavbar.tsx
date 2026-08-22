@@ -1,167 +1,169 @@
 import React from 'react';
 import { useAuth } from '../context/AuthContext';
 import { 
+  Zap, 
   Building2, 
   Calendar, 
+  LogOut, 
   ShieldCheck, 
   User as UserIcon, 
-  LogOut, 
-  LogIn, 
+  ChevronDown,
+  Layers,
+  Leaf,
   Sparkles,
-  Database,
-  Calculator,
-  RefreshCw,
-  Zap
+  Database
 } from 'lucide-react';
+import { isSupabaseConfigured } from '../services/supabase';
 
-interface HeaderNavbarProps {
-  onOpenLogin?: () => void;
-  onOpenSupabaseModal?: () => void;
-  onOpenCalculatorModal?: () => void;
-  onResetDemo?: () => void;
-  isResetting?: boolean;
-  onToggleSidebarMobile?: () => void;
-  onOpenMobileNav?: () => void;
-}
-
-export const HeaderNavbar: React.FC<HeaderNavbarProps> = ({
-  onOpenLogin,
-  onOpenSupabaseModal,
-  onOpenCalculatorModal,
-  onResetDemo,
-  isResetting = false,
-  onToggleSidebarMobile,
-  onOpenMobileNav
-}) => {
+export const HeaderNavbar: React.FC = () => {
   const { 
     user, 
-    isAuthenticated, 
-    isSuperAdmin, 
     logout, 
-    selectedYear, 
-    setSelectedYear, 
+    facilities, 
     selectedFacilityId, 
     setSelectedFacilityId, 
-    facilities,
-    accessibleFacilities,
-    notify
+    selectedYear, 
+    setSelectedYear,
+    isSuperAdmin,
+    isBranchAdmin,
+    getScopedFacilities
   } = useAuth();
 
-  const handleMobileToggle = onToggleSidebarMobile || onOpenMobileNav || (() => {});
+  const scopedFacilities = getScopedFacilities();
+
+  // Group facilities into Branches and their child CSCs for clean selection
+  const parentBranches = scopedFacilities.filter(f => f.type === 'Branch' || f.isParent);
+  const standaloneFacilities = scopedFacilities.filter(f => !f.parentId && f.type !== 'Branch' && !f.isParent);
 
   return (
-    <header className="h-16 bg-white border-b border-slate-200 px-4 sm:px-8 flex items-center justify-between sticky top-0 z-30">
-      {/* Left: Mobile Toggle & Title */}
-      <div className="flex items-center gap-3">
-        <button
-          onClick={handleMobileToggle}
-          className="md:hidden p-2 rounded-lg text-slate-500 hover:text-slate-900 hover:bg-slate-100 focus:outline-none"
-          aria-label="Open Sidebar"
-        >
-          <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16" />
-          </svg>
-        </button>
-
-        <h1 className="text-base sm:text-lg font-semibold text-slate-800 tracking-tight">
-          GHG Emissions Overview
-        </h1>
-      </div>
-
-      {/* Center & Right Controls */}
-      <div className="flex items-center gap-3 sm:gap-4">
-        {/* Global Scope Selectors (Year & Facility) */}
-        <div className="hidden lg:flex items-center gap-2 bg-slate-50 px-2.5 py-1 rounded-xl border border-slate-200">
-          <div className="flex items-center gap-1.5 text-xs">
-            <Calendar className="w-3.5 h-3.5 text-emerald-600" />
-            <select
-              value={selectedYear}
-              onChange={(e) => setSelectedYear(Number(e.target.value))}
-              className="bg-transparent text-slate-700 font-semibold text-xs py-0.5 focus:outline-none cursor-pointer"
-            >
-              <option value={2026}>FY 2026</option>
-              <option value={2025}>FY 2025</option>
-              <option value={2024}>FY 2024</option>
-            </select>
+    <header className="bg-slate-900 border-b border-slate-800 text-white sticky top-0 z-30 shadow-md">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="flex items-center justify-between h-16">
+          
+          {/* Brand Logo & Name */}
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center shadow-inner">
+              <Zap className="w-5 h-5 text-emerald-400" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="font-extrabold text-base tracking-tight text-white">LECO</span>
+                <span className="text-xs px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-semibold border border-emerald-500/30">
+                  Carbon Accounting
+                </span>
+              </div>
+              <div className="text-[11px] text-slate-400 hidden sm:block">
+                Lanka Electricity Company (Pvt) Ltd &bull; Corporate GHG Inventory
+              </div>
+            </div>
           </div>
 
-          <div className="h-3 w-px bg-slate-300" />
+          {/* Center: Global Scope Selectors (Facility & Year) */}
+          <div className="hidden md:flex items-center gap-3">
+            {/* Facility Filter */}
+            <div className="flex items-center bg-slate-800/80 border border-slate-700/80 rounded-xl px-3 py-1.5 shadow-sm">
+              <Building2 className="w-4 h-4 text-emerald-400 mr-2 shrink-0" />
+              <div className="flex flex-col">
+                <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider">Facility Scope</span>
+                <select
+                  value={selectedFacilityId}
+                  onChange={(e) => setSelectedFacilityId(e.target.value)}
+                  className="bg-transparent text-xs font-semibold text-slate-100 focus:outline-none cursor-pointer pr-4"
+                >
+                  {isSuperAdmin && (
+                    <option value="ALL" className="bg-slate-900 text-white">
+                      🏢 ALL LECO Facilities (Corporate Global)
+                    </option>
+                  )}
 
-          <div className="flex items-center gap-1.5 text-xs">
-            <Building2 className="w-3.5 h-3.5 text-blue-600" />
-            <select
-              value={selectedFacilityId}
-              onChange={(e) => setSelectedFacilityId(e.target.value)}
-              className="bg-transparent text-slate-700 font-semibold text-xs py-0.5 focus:outline-none cursor-pointer max-w-[180px] truncate"
-            >
-              {isSuperAdmin && <option value="ALL">All Facilities (Consolidated)</option>}
-              {accessibleFacilities.map((fac) => (
-                <option key={fac.id} value={fac.id}>
-                  {fac.name}
-                </option>
-              ))}
-            </select>
+                  {/* Branches & their CSCs */}
+                  {parentBranches.map(branch => {
+                    const children = scopedFacilities.filter(f => f.parentId === branch.id);
+                    return (
+                      <optgroup key={branch.id} label={`📍 ${branch.name}`} className="bg-slate-900 text-slate-200 font-bold">
+                        <option value={branch.id} className="bg-slate-900 text-white font-semibold pl-4">
+                          ↳ {branch.name} (Parent Branch & All CSCs)
+                        </option>
+                        {children.map(child => (
+                          <option key={child.id} value={child.id} className="bg-slate-900 text-slate-300 pl-6">
+                            &nbsp;&nbsp;&bull; {child.name}
+                          </option>
+                        ))}
+                      </optgroup>
+                    );
+                  })}
+
+                  {/* Standalone facilities */}
+                  {standaloneFacilities.length > 0 && (
+                    <optgroup label="🏭 Specialised Facilities & Depots" className="bg-slate-900 text-slate-200 font-bold">
+                      {standaloneFacilities.map(fac => (
+                        <option key={fac.id} value={fac.id} className="bg-slate-900 text-white">
+                          &bull; {fac.name} ({fac.type})
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                </select>
+              </div>
+            </div>
+
+            {/* Reporting Year Selector */}
+            <div className="flex items-center bg-slate-800/80 border border-slate-700/80 rounded-xl px-3 py-1.5 shadow-sm">
+              <Calendar className="w-4 h-4 text-amber-400 mr-2 shrink-0" />
+              <div className="flex flex-col">
+                <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider">Reporting Year</span>
+                <select
+                  value={selectedYear}
+                  onChange={(e) => setSelectedYear(Number(e.target.value))}
+                  className="bg-transparent text-xs font-semibold text-slate-100 focus:outline-none cursor-pointer"
+                >
+                  <option value={2026} className="bg-slate-900 text-white">FY 2026</option>
+                  <option value={2025} className="bg-slate-900 text-white">FY 2025</option>
+                  <option value={2024} className="bg-slate-900 text-white">FY 2024</option>
+                  <option value={2023} className="bg-slate-900 text-white">FY 2023</option>
+                  <option value={2022} className="bg-slate-900 text-white">FY 2022</option>
+                </select>
+              </div>
+            </div>
           </div>
+
+          {/* Right: User Profile & Logout */}
+          <div className="flex items-center gap-3">
+            {user && (
+              <div className="flex items-center gap-3 pl-3 border-l border-slate-800">
+                <div className="text-right hidden sm:block">
+                  <div className="text-xs font-bold text-slate-100 flex items-center justify-end gap-1.5">
+                    {user.name}
+                    {isSuperAdmin && <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />}
+                  </div>
+                  <div className="text-[11px] text-slate-400 flex items-center justify-end gap-1.5">
+                    <span className={`inline-block w-1.5 h-1.5 rounded-full ${
+                      isSuperAdmin ? 'bg-emerald-400' : isBranchAdmin ? 'bg-blue-400' : 'bg-amber-400'
+                    }`} />
+                    <span>
+                      {isSuperAdmin ? 'Super Admin' : isBranchAdmin ? `Branch Admin (${user.facilityName || 'Branch'})` : `${user.facilityName || 'Officer'}`}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Avatar */}
+                <div className="w-9 h-9 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-300 font-bold text-sm shadow-inner">
+                  {user.name ? user.name.charAt(0).toUpperCase() : 'U'}
+                </div>
+
+                {/* Logout Button */}
+                <button
+                  onClick={logout}
+                  title="Sign Out"
+                  className="p-2 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-xl transition cursor-pointer"
+                >
+                  <LogOut className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+          </div>
+
         </div>
-
-        {/* Reporting Period Badge */}
-        <div className="px-3 py-1 bg-emerald-50 text-emerald-700 text-xs font-bold rounded-full border border-emerald-100 hidden sm:inline-flex items-center gap-1.5">
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-          <span>FY {selectedYear}</span>
-        </div>
-
-        {/* Quick Sandbox Calculator */}
-        <button
-          onClick={onOpenCalculatorModal}
-          title="Quick GHG Calculator"
-          className="hidden sm:inline-flex items-center gap-1.5 text-xs font-semibold bg-white hover:bg-slate-50 text-slate-700 px-3 py-1.5 rounded-xl border border-slate-200 transition shadow-xs"
-        >
-          <Calculator className="w-3.5 h-3.5 text-emerald-600" />
-          <span>Calculator</span>
-        </button>
-
-        {/* Supabase Schema Modal Button */}
-        <button
-          onClick={onOpenSupabaseModal}
-          title="Supabase Database & SQL Schema"
-          className="inline-flex items-center gap-1.5 text-xs font-semibold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 px-3 py-1.5 rounded-xl border border-emerald-200 transition"
-        >
-          <Database className="w-3.5 h-3.5 text-emerald-600" />
-          <span className="hidden sm:inline">Supabase</span>
-        </button>
-
-        {/* Reset Demo Data (for testing) */}
-        {isSuperAdmin && (
-          <button
-            onClick={onResetDemo}
-            disabled={isResetting}
-            title="Reset sample test data"
-            className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 flex items-center justify-center text-slate-500 hover:text-slate-800 transition"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${isResetting ? 'animate-spin text-emerald-600' : ''}`} />
-          </button>
-        )}
-
-        {/* Auth / Sign Out */}
-        {isAuthenticated && user ? (
-          <div className="flex items-center gap-2 pl-2 border-l border-slate-200">
-            <button
-              onClick={logout}
-              title="Sign Out"
-              className="p-1.5 rounded-xl text-slate-400 hover:text-red-600 hover:bg-red-50 transition"
-            >
-              <LogOut className="w-4 h-4" />
-            </button>
-          </div>
-        ) : (
-          <button
-            onClick={onOpenLogin}
-            className="inline-flex items-center gap-1.5 text-xs font-bold bg-[#064E3B] hover:bg-emerald-900 text-white px-3.5 py-1.5 rounded-xl transition shadow-xs"
-          >
-            <LogIn className="w-3.5 h-3.5" />
-            <span>Sign In</span>
-          </button>
-        )}
       </div>
     </header>
   );

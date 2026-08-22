@@ -1,61 +1,18 @@
 import fs from 'fs';
 import path from 'path';
 import { 
-  Facility, 
-  FacilityJobRole,
   User, 
-  EmissionFactorEntry, 
-  Scope1VehicleRecord, 
-  Scope1GeneratorRecord, 
-  Scope1StationaryFuelRecord, 
-  Scope1RefrigerantRecord, 
-  Scope1SF6Record, 
-  Scope2ElectricityRecord, 
-  Scope2SolarRecord, 
-  Scope3PurchasedGoodsRecord, 
-  Scope3CapitalGoodsRecord, 
-  Scope3ConstructionRecord, 
-  Scope3UpstreamFreightRecord, 
-  Scope3WasteRecord, 
-  Scope3BusinessTravelRecord, 
-  Scope3DistributionLossRecord,
-  ScopeTotals,
+  Facility, 
+  EmissionFactor, 
+  Scope1Record, 
+  Scope2Record, 
+  Scope3Record,
+  DashboardSummary,
   MonthlyEmissionTrend,
-  FacilityEmissionStat,
-  ReportingMonth
-} from '../src/types.js';
+  FacilityEmissionStat
+} from '../src/types';
 
 const DATA_FILE = path.join(process.cwd(), 'server-data.json');
-
-// Default initial emission factors
-export const DEFAULT_EMISSION_FACTORS: EmissionFactorEntry[] = [
-  { id: 'ef-1', category: 'Scope 1 Fuel', fuelOrMaterial: 'Auto Diesel', unit: 'Liters', factorKgCO2e: 2.6800, sourceStandard: 'IPCC 2006 / DEFRA 2024', notes: 'LECO fleet & backup generators' },
-  { id: 'ef-2', category: 'Scope 1 Fuel', fuelOrMaterial: 'Super Diesel', unit: 'Liters', factorKgCO2e: 2.6900, sourceStandard: 'DEFRA 2024', notes: 'Low sulfur fleet' },
-  { id: 'ef-3', category: 'Scope 1 Fuel', fuelOrMaterial: 'Petrol (Gasoline)', unit: 'Liters', factorKgCO2e: 2.3100, sourceStandard: 'IPCC 2006 / DEFRA 2024', notes: 'Fleet motorcycles and cars' },
-  { id: 'ef-4', category: 'Scope 1 Fuel', fuelOrMaterial: 'LPG (Commercial 37.5kg)', unit: 'kg', factorKgCO2e: 2.9800, sourceStandard: 'GHG Protocol Stationary Fuel', notes: 'Canteen and workshop heating' },
-  { id: 'ef-5', category: 'Scope 1 Fuel', fuelOrMaterial: 'LPG (12.5kg)', unit: 'kg', factorKgCO2e: 2.9800, sourceStandard: 'GHG Protocol Stationary Fuel', notes: 'Branch offices' },
-  { id: 'ef-6', category: 'Scope 1 Fuel', fuelOrMaterial: 'Kerosene', unit: 'Liters', factorKgCO2e: 2.5400, sourceStandard: 'IPCC 2006', notes: 'Testing & cleaning' },
-  { id: 'ef-7', category: 'Scope 1 Refrigerant', fuelOrMaterial: 'R-22', unit: 'kg', factorKgCO2e: 1810.0000, sourceStandard: 'IPCC AR4 / Montreal Protocol', notes: 'Older HVAC systems' },
-  { id: 'ef-8', category: 'Scope 1 Refrigerant', fuelOrMaterial: 'R-410A', unit: 'kg', factorKgCO2e: 2088.0000, sourceStandard: 'IPCC AR4', notes: 'Standard VRF & Split Inverter ACs' },
-  { id: 'ef-9', category: 'Scope 1 Refrigerant', fuelOrMaterial: 'R-134a', unit: 'kg', factorKgCO2e: 1430.0000, sourceStandard: 'IPCC AR4', notes: 'Vehicle AC and water chillers' },
-  { id: 'ef-10', category: 'Scope 1 Refrigerant', fuelOrMaterial: 'R-32', unit: 'kg', factorKgCO2e: 675.0000, sourceStandard: 'IPCC AR5', notes: 'Low-GWP Split AC units' },
-  { id: 'ef-11', category: 'Scope 1 Refrigerant', fuelOrMaterial: 'R-407C', unit: 'kg', factorKgCO2e: 1774.0000, sourceStandard: 'IPCC AR4', notes: 'Commercial HVAC packages' },
-  { id: 'ef-12', category: 'Scope 1 SF6', fuelOrMaterial: 'SF6 (Sulfur Hexafluoride)', unit: 'kg', factorKgCO2e: 23500.0000, sourceStandard: 'IPCC AR5 / GHG Protocol', notes: 'High voltage switchgear insulation gas' },
-  { id: 'ef-13', category: 'Scope 2 Grid', fuelOrMaterial: 'Sri Lanka CEB/LECO Grid Electricity', unit: 'kWh', factorKgCO2e: 0.6550, sourceStandard: 'SLSEA / CEB Grid Emission Factor', notes: 'Grid emission factor for Sri Lanka' },
-  { id: 'ef-14', category: 'Scope 3 Spend', fuelOrMaterial: 'Transformers & Electrical Plant', unit: 'LKR 1,000', factorKgCO2e: 0.5200, sourceStandard: 'DEFRA CEDA EEIO Spend Model', notes: 'Capital distribution equipment' },
-  { id: 'ef-15', category: 'Scope 3 Spend', fuelOrMaterial: 'Cables, Wires & Hardware', unit: 'LKR 1,000', factorKgCO2e: 0.4800, sourceStandard: 'DEFRA CEDA EEIO Spend Model', notes: 'Conductors & cables' },
-  { id: 'ef-16', category: 'Scope 3 Spend', fuelOrMaterial: 'Civil Works & Construction', unit: 'LKR 1,000', factorKgCO2e: 0.3800, sourceStandard: 'DEFRA CEDA EEIO Spend Model', notes: 'Infrastructure civil works' },
-  { id: 'ef-17', category: 'Scope 3 Transport', fuelOrMaterial: 'Heavy Diesel Truck Freight (14t+)', unit: 'tonne-km', factorKgCO2e: 0.1620, sourceStandard: 'GLEC Framework / DEFRA', notes: 'Bulk logistics from port/stores' },
-  { id: 'ef-18', category: 'Scope 3 Transport', fuelOrMaterial: 'Medium Truck Freight (7.5t)', unit: 'tonne-km', factorKgCO2e: 0.2450, sourceStandard: 'GLEC Framework / DEFRA', notes: 'Inter-store transfers' },
-  { id: 'ef-19', category: 'Scope 3 Waste', fuelOrMaterial: 'Mixed Waste to Landfill', unit: 'kg', factorKgCO2e: 0.5800, sourceStandard: 'IPCC Waste Model', notes: 'General unsegregated waste' },
-  { id: 'ef-20', category: 'Scope 3 Waste', fuelOrMaterial: 'Scrap Metal Recycled', unit: 'kg', factorKgCO2e: -0.2200, sourceStandard: 'Circular Economy Avoided Factor', notes: 'Scrap copper & aluminium recycling credit' },
-  { id: 'ef-21', category: 'Scope 3 Travel', fuelOrMaterial: 'Domestic Air Flight', unit: 'passenger-km', factorKgCO2e: 0.1550, sourceStandard: 'ICAO Carbon Calculator', notes: 'Business travel' },
-  { id: 'ef-22', category: 'Scope 3 Travel', fuelOrMaterial: 'International Air Flight', unit: 'passenger-km', factorKgCO2e: 0.1020, sourceStandard: 'ICAO Carbon Calculator', notes: 'Training & technical conferences' },
-  { id: 'ef-23', category: 'Scope 3 Travel', fuelOrMaterial: 'Company Car / Hired Vehicle', unit: 'km', factorKgCO2e: 0.1710, sourceStandard: 'DEFRA 2024', notes: 'Executive and site visits' },
-  { id: 'ef-24', category: 'Scope 3 Travel', fuelOrMaterial: 'Public Bus', unit: 'passenger-km', factorKgCO2e: 0.0420, sourceStandard: 'DEFRA 2024', notes: 'Staff commuting survey' },
-  { id: 'ef-25', category: 'Scope 3 Travel', fuelOrMaterial: 'Train', unit: 'passenger-km', factorKgCO2e: 0.0350, sourceStandard: 'DEFRA 2024', notes: 'Staff commuting survey' },
-  { id: 'ef-26', category: 'Scope 3 Travel', fuelOrMaterial: 'Motorcycle', unit: 'km', factorKgCO2e: 0.1030, sourceStandard: 'DEFRA 2024', notes: 'Field officers daily commuting' }
-];
 
 export const DEFAULT_FACILITIES: Facility[] = [
   // 1. Parent: Kotte Branch -> Children: Pitakotte CSC, Kolonnawa CSC, Kotikawatta CSC
@@ -266,9 +223,9 @@ export const DEFAULT_FACILITIES: Facility[] = [
     responsibleOfficer: 'Mr. Kusal Fernando',
     headDesignation: 'Area Electrical Engineer',
     officerEmail: 'kusal.f@leco.com',
-    contactNumber: '+94 11 264 5890',
+    contactNumber: '+94 11 264 5510',
     electricityAccountNo: 'ACC-011-4567',
-    meterNumbers: ['MTR-MR-22'],
+    meterNumbers: ['MTR-MR-01', 'MTR-MR-02'],
     hasSolarPV: true,
     solarCapacityKW: 40.0,
     jobRoles: [
@@ -459,9 +416,9 @@ export const DEFAULT_FACILITIES: Facility[] = [
     responsibleOfficer: 'Mr. Asanka Weerakkody',
     headDesignation: 'Branch Superintendent',
     officerEmail: 'asanka.w@leco.com',
-    contactNumber: '+94 34 222 3450',
+    contactNumber: '+94 34 222 2250',
     electricityAccountNo: 'ACC-034-8890',
-    meterNumbers: ['MTR-KL-05'],
+    meterNumbers: ['MTR-KL-01'],
     hasSolarPV: true,
     solarCapacityKW: 30.0,
     jobRoles: [
@@ -545,9 +502,9 @@ export const DEFAULT_FACILITIES: Facility[] = [
     responsibleOfficer: 'Eng. Priyantha Dissanayake',
     headDesignation: 'Chief Area Engineer',
     officerEmail: 'priyantha.d@leco.com',
-    contactNumber: '+94 31 223 8812',
+    contactNumber: '+94 31 222 3450',
     electricityAccountNo: 'ACC-031-1029',
-    meterNumbers: ['MTR-NG-44'],
+    meterNumbers: ['MTR-NG-01'],
     hasSolarPV: true,
     solarCapacityKW: 50.0,
     jobRoles: [
@@ -705,7 +662,7 @@ export const DEFAULT_FACILITIES: Facility[] = [
     ]
   },
 
-  // 8. Independent Facilities (No children / Standalone)
+  // 8. Independent Facilities (Standalones)
   {
     id: 'fac-ho-colombo',
     code: 'LECO-HO-01',
@@ -836,16 +793,16 @@ export const DEFAULT_FACILITIES: Facility[] = [
 
 export const DEFAULT_USERS: User[] = [
   {
-    id: 'usr-1',
+    id: 'usr-root-superadmin',
     email: 'superadmincf@leco.com',
-    name: 'Super Admin (LECO Sustainability Lead)',
+    name: 'LECO Corporate Super Administrator',
     role: 'super_admin',
-    department: 'Corporate Sustainability & Executive Engineering',
+    jobRole: 'Chief Sustainability & GHG Director',
     canDelete: true,
-    isImmutableRootAdmin: true,
-    allowedModules: ['dashboard', 'scope1', 'scope2', 'scope3', 'reports', 'facilities', 'users', 'emission-factors', 'supabase-sql', 'calculator'],
+    allowedModules: ['dashboard', 'scope1', 'scope2', 'scope3', 'reports', 'facilities', 'users', 'factors', 'calculator', 'sync'],
+    department: 'Executive Directorate & Sustainability Management',
     isActive: true,
-    contactNumber: '+94 11 237 1600',
+    contactNumber: '+94 11 237 1665',
     createdAt: new Date().toISOString()
   },
   {
@@ -882,19 +839,6 @@ export const DEFAULT_USERS: User[] = [
   },
   {
     id: 'usr-4',
-    email: 'admin.western@leco.com',
-    name: 'Eng. Janaka Weerasinghe',
-    role: 'branch_admin',
-    assignedFacilityIds: ['fac-br-kotte', 'fac-br-moratuwa', 'fac-br-nugegoda', 'fac-ho-colombo'],
-    canDelete: true,
-    allowedModules: ['dashboard', 'scope1', 'scope2', 'scope3', 'reports', 'facilities', 'users', 'calculator'],
-    department: 'Western Province Regional Administration',
-    isActive: true,
-    contactNumber: '+94 11 286 5500',
-    createdAt: new Date().toISOString()
-  },
-  {
-    id: 'usr-5',
     email: 'officer.pitakotte@leco.com',
     name: 'Mr. Sarath Wijesinghe',
     role: 'facility_user',
@@ -909,7 +853,7 @@ export const DEFAULT_USERS: User[] = [
     createdAt: new Date().toISOString()
   },
   {
-    id: 'usr-6',
+    id: 'usr-5',
     email: 'officer.dalugama@leco.com',
     name: 'Mr. Bandula Jayakody',
     role: 'facility_user',
@@ -924,22 +868,22 @@ export const DEFAULT_USERS: User[] = [
     createdAt: new Date().toISOString()
   },
   {
-    id: 'usr-7',
+    id: 'usr-6',
     email: 'officer.kalutara@leco.com',
     name: 'Mr. Asanka Weerakkody',
     role: 'facility_user',
     facilityId: 'fac-br-kalutara',
     facilityName: 'Kalutara Branch',
     jobRole: 'Maintenance Superintendent',
-    canDelete: false, // Delete disabled
+    canDelete: false,
     allowedModules: ['dashboard', 'scope1', 'scope2', 'scope3', 'reports', 'calculator'],
     department: 'Branch Operations',
     isActive: true,
-    contactNumber: '+94 34 222 3450',
+    contactNumber: '+94 34 222 2250',
     createdAt: new Date().toISOString()
   },
   {
-    id: 'usr-8',
+    id: 'usr-7',
     email: 'factory.qa@leco.com',
     name: 'Eng. Ruwan Jayasuriya',
     role: 'facility_user',
@@ -947,762 +891,301 @@ export const DEFAULT_USERS: User[] = [
     facilityName: 'LECO Meter Testing & Assembly Factory',
     jobRole: 'Calibration & QA Engineer',
     canDelete: true,
-    allowedModules: ['dashboard', 'scope1', 'scope2', 'scope3', 'reports', 'calculator'],
-    department: 'Meter Manufacturing & QA',
+    allowedModules: ['dashboard', 'scope1', 'scope2', 'scope3', 'calculator'],
+    department: 'Quality Assurance & Production',
     isActive: true,
     contactNumber: '+94 38 229 4410',
     createdAt: new Date().toISOString()
   }
 ];
 
-export interface DatabaseSchema {
-  facilities: Facility[];
-  users: User[];
-  emissionFactors: EmissionFactorEntry[];
-  scope1Vehicles: Scope1VehicleRecord[];
-  scope1Generators: Scope1GeneratorRecord[];
-  scope1Stationary: Scope1StationaryFuelRecord[];
-  scope1Refrigerants: Scope1RefrigerantRecord[];
-  scope1SF6: Scope1SF6Record[];
-  scope2Electricity: Scope2ElectricityRecord[];
-  scope2Solar: Scope2SolarRecord[];
-  scope3PurchasedGoods: Scope3PurchasedGoodsRecord[];
-  scope3CapitalGoods: Scope3CapitalGoodsRecord[];
-  scope3Construction: Scope3ConstructionRecord[];
-  scope3UpstreamFreight: Scope3UpstreamFreightRecord[];
-  scope3Waste: Scope3WasteRecord[];
-  scope3BusinessTravel: Scope3BusinessTravelRecord[];
-  scope3DistributionLoss: Scope3DistributionLossRecord[];
-}
+export const DEFAULT_EMISSION_FACTORS: EmissionFactor[] = [
+  { id: 'ef-1', category: 'Scope 1', subCategory: 'Stationary Fuel', itemName: 'Diesel (Industrial Generator)', factor: 2.6878, unit: 'kg CO2e / Liter', referenceSource: 'IPCC 2006 Guidelines for National GHG Inventories', year: 2024, isCustom: false },
+  { id: 'ef-2', category: 'Scope 1', subCategory: 'Stationary Fuel', itemName: 'Heavy Fuel Oil (Furnace Oil)', factor: 3.1780, unit: 'kg CO2e / Liter', referenceSource: 'IPCC 2006 Guidelines', year: 2024, isCustom: false },
+  { id: 'ef-3', category: 'Scope 1', subCategory: 'Stationary Fuel', itemName: 'LPG (Liquid Petroleum Gas)', factor: 1.5120, unit: 'kg CO2e / Liter', referenceSource: 'IPCC 2006 Guidelines', year: 2024, isCustom: false },
+  { id: 'ef-4', category: 'Scope 1', subCategory: 'Mobile Fuel', itemName: 'Diesel (Commercial Vans & Trucks)', factor: 2.6878, unit: 'kg CO2e / Liter', referenceSource: 'DEFRA / IPCC 2006 Mobile Combustion', year: 2024, isCustom: false },
+  { id: 'ef-5', category: 'Scope 1', subCategory: 'Mobile Fuel', itemName: 'Petrol / Gasoline (Motorbikes & Cars)', factor: 2.3149, unit: 'kg CO2e / Liter', referenceSource: 'DEFRA / IPCC 2006 Mobile Combustion', year: 2024, isCustom: false },
+  { id: 'ef-6', category: 'Scope 1', subCategory: 'Fugitive Gas', itemName: 'SF6 (Sulfur Hexafluoride - Switchgear)', factor: 22800.0, unit: 'kg CO2e / kg', referenceSource: 'IPCC AR4 / AR5 GWP Factor', year: 2024, isCustom: false },
+  { id: 'ef-7', category: 'Scope 1', subCategory: 'Fugitive Gas', itemName: 'R410A Refrigerant', factor: 2088.0, unit: 'kg CO2e / kg', referenceSource: 'IPCC AR4 GWP Factor', year: 2024, isCustom: false },
+  { id: 'ef-8', category: 'Scope 1', subCategory: 'Fugitive Gas', itemName: 'R134a Refrigerant', factor: 1430.0, unit: 'kg CO2e / kg', referenceSource: 'IPCC AR4 GWP Factor', year: 2024, isCustom: false },
+  { id: 'ef-9', category: 'Scope 2', subCategory: 'Electricity Grid', itemName: 'Sri Lanka National Grid Average (CEB/LECO)', factor: 0.6550, unit: 'kg CO2e / kWh', referenceSource: 'Sri Lanka Sustainable Energy Authority (SLSEA) 2023/24 Grid Factor', year: 2024, isCustom: false },
+  { id: 'ef-10', category: 'Scope 3', subCategory: 'Purchased Goods', itemName: 'Paper Consumption (A4 Office Ream)', factor: 0.9500, unit: 'kg CO2e / kg', referenceSource: 'DEFRA 2024 Material Use', year: 2024, isCustom: false },
+  { id: 'ef-11', category: 'Scope 3', subCategory: 'Purchased Goods', itemName: 'Distribution Transformers (New)', factor: 4.2000, unit: 'kg CO2e / kg', referenceSource: 'LECO LCA Environmental Assessment 2023', year: 2024, isCustom: false },
+  { id: 'ef-12', category: 'Scope 3', subCategory: 'Purchased Goods', itemName: 'Smart Electricity Meters (LHM)', factor: 8.5000, unit: 'kg CO2e / unit', referenceSource: 'LECO Meter Factory LCA Study', year: 2024, isCustom: false },
+  { id: 'ef-13', category: 'Scope 3', subCategory: 'Waste Operations', itemName: 'Municipal Solid Waste Landfill', factor: 0.5200, unit: 'kg CO2e / kg', referenceSource: 'DEFRA 2024 Waste Disposal', year: 2024, isCustom: false },
+  { id: 'ef-14', category: 'Scope 3', subCategory: 'Business Travel', itemName: 'Domestic Air & Road Travel (Chartered)', factor: 0.1700, unit: 'kg CO2e / passenger-km', referenceSource: 'DEFRA 2024 Business Travel', year: 2024, isCustom: false },
+  { id: 'ef-15', category: 'Scope 3', subCategory: 'Employee Commute', itemName: 'Average Commute (Motorbike/Bus/Car blend)', factor: 0.0890, unit: 'kg CO2e / passenger-km', referenceSource: 'DEFRA 2024 Commuting Factor', year: 2024, isCustom: false }
+];
 
-// Initial realistic Seed records for LECO
-function generateInitialRecords(): DatabaseSchema {
-  const months: ReportingMonth[] = [
-    'January', 'February', 'March', 'April', 'May', 'June',
-    'July', 'August', 'September', 'October', 'November', 'December'
-  ];
+export const INITIAL_SCOPE1_RECORDS: Scope1Record[] = [
+  {
+    id: 's1-101',
+    facilityId: 'fac-ho-colombo',
+    facilityName: 'LECO Head Office',
+    category: 'Stationary Combustion',
+    sourceDescription: 'Backup Generator Caterpiller 500kVA',
+    fuelTypeOrGas: 'Diesel',
+    unit: 'Liters',
+    quantity: 1250,
+    emissionFactor: 2.6878,
+    emissionFactorUnit: 'kg CO2e / Liter',
+    totalEmissionsKgCO2e: 3359.75,
+    totalEmissionsTonsCO2e: 3.36,
+    reportingMonth: '01',
+    reportingYear: 2024,
+    notes: 'Power backup during scheduled grid maintenance',
+    createdBy: 'Samantha Perera',
+    createdAt: '2024-01-28T10:00:00Z'
+  },
+  {
+    id: 's1-102',
+    facilityId: 'fac-ho-colombo',
+    facilityName: 'LECO Head Office',
+    category: 'Mobile Combustion',
+    sourceDescription: 'Executive and Emergency Fleet (12 vehicles)',
+    fuelTypeOrGas: 'Petrol / Gasoline',
+    unit: 'Liters',
+    quantity: 2400,
+    emissionFactor: 2.3149,
+    emissionFactorUnit: 'kg CO2e / Liter',
+    totalEmissionsKgCO2e: 5555.76,
+    totalEmissionsTonsCO2e: 5.56,
+    reportingMonth: '01',
+    reportingYear: 2024,
+    notes: 'Fleet fuel slips verified by Admin Dept',
+    createdBy: 'Samantha Perera',
+    createdAt: '2024-01-29T11:00:00Z'
+  },
+  {
+    id: 's1-103',
+    facilityId: 'fac-br-kotte',
+    facilityName: 'Kotte Branch',
+    category: 'Mobile Combustion',
+    sourceDescription: 'Field Breakdown & Line Inspection Vans (WP-CAD-8812, WP-NA-9021)',
+    fuelTypeOrGas: 'Diesel',
+    unit: 'Liters',
+    quantity: 1850,
+    emissionFactor: 2.6878,
+    emissionFactorUnit: 'kg CO2e / Liter',
+    totalEmissionsKgCO2e: 4972.43,
+    totalEmissionsTonsCO2e: 4.97,
+    reportingMonth: '01',
+    reportingYear: 2024,
+    notes: 'Routine service coverage for Kotte, Kolonnawa & Pitakotte CSC zones',
+    createdBy: 'Dilani Senanayake',
+    createdAt: '2024-01-30T09:30:00Z'
+  },
+  {
+    id: 's1-104',
+    facilityId: 'fac-csc-pitakotte',
+    facilityName: 'Pitakotte CSC',
+    category: 'Mobile Combustion',
+    sourceDescription: 'Lineman Inspection Motorbikes (WP-XZ-1102, WP-XZ-1103)',
+    fuelTypeOrGas: 'Petrol / Gasoline',
+    unit: 'Liters',
+    quantity: 280,
+    emissionFactor: 2.3149,
+    emissionFactorUnit: 'kg CO2e / Liter',
+    totalEmissionsKgCO2e: 648.17,
+    totalEmissionsTonsCO2e: 0.65,
+    reportingMonth: '01',
+    reportingYear: 2024,
+    notes: 'Daily meter reading and low voltage breakdown patrol',
+    createdBy: 'Sarath Wijesinghe',
+    createdAt: '2024-01-31T08:00:00Z'
+  },
+  {
+    id: 's1-105',
+    facilityId: 'fac-br-kelaniya',
+    facilityName: 'Kelaniya Branch',
+    category: 'Fugitive Emissions',
+    sourceDescription: 'Substation SF6 Gas Insulated Switchgear Top-up (Unit GIS-KLN-04)',
+    fuelTypeOrGas: 'SF6 Gas',
+    unit: 'kg',
+    quantity: 1.2,
+    emissionFactor: 22800.0,
+    emissionFactorUnit: 'kg CO2e / kg',
+    totalEmissionsKgCO2e: 27360.0,
+    totalEmissionsTonsCO2e: 27.36,
+    reportingMonth: '02',
+    reportingYear: 2024,
+    notes: 'Annual substation pressure recalibration and seal replacement',
+    createdBy: 'Rohan Samarasinghe',
+    createdAt: '2024-02-15T14:30:00Z'
+  }
+];
 
-  // Vehicles
-  const scope1Vehicles: Scope1VehicleRecord[] = [
-    {
-      id: 'veh-1',
-      facilityId: 'fac-1',
-      facilityName: 'LECO Head Office',
-      reportingYear: 2025,
-      month: 'January',
-      responsibleOfficer: 'Mr. Samantha Perera',
-      vehicleNo: 'WP-CAD-4590',
-      vehicleType: 'Double Cab / Pickup',
-      fuelType: 'Auto Diesel',
-      quantityLiters: 320,
-      distanceKm: 2850,
-      fuelCardNo: 'FC-882190',
-      emissionFactorKgPerL: 2.68,
-      calculatedKgCO2e: 320 * 2.68,
-      calculatedTCO2e: Number(((320 * 2.68) / 1000).toFixed(4)),
-      status: 'Approved',
-      remarks: 'Engineering site inspections Colombo South',
-      createdAt: '2025-02-01T08:00:00Z',
-      updatedAt: '2025-02-01T08:00:00Z'
-    },
-    {
-      id: 'veh-2',
-      facilityId: 'fac-2',
-      facilityName: 'LECO Meter Testing & Assembly Factory',
-      reportingYear: 2025,
-      month: 'January',
-      responsibleOfficer: 'Eng. Ruwan Jayasuriya',
-      vehicleNo: 'WP-LY-7812',
-      vehicleType: 'Lorry / Heavy Truck',
-      fuelType: 'Auto Diesel',
-      quantityLiters: 480,
-      distanceKm: 3400,
-      fuelCardNo: 'FC-991204',
-      emissionFactorKgPerL: 2.68,
-      calculatedKgCO2e: 480 * 2.68,
-      calculatedTCO2e: Number(((480 * 2.68) / 1000).toFixed(4)),
-      status: 'Approved',
-      remarks: 'Transporting calibrated energy meters to branch stores',
-      createdAt: '2025-02-02T09:30:00Z',
-      updatedAt: '2025-02-02T09:30:00Z'
-    },
-    {
-      id: 'veh-3',
-      facilityId: 'fac-3',
-      facilityName: 'Kotte Branch & Customer Service Centre',
-      reportingYear: 2025,
-      month: 'January',
-      responsibleOfficer: 'Mrs. Dilani Senanayake',
-      vehicleNo: 'WP-NC-3312',
-      vehicleType: 'Special Utility Vehicle',
-      fuelType: 'Auto Diesel',
-      quantityLiters: 240,
-      distanceKm: 1950,
-      fuelCardNo: 'FC-110294',
-      emissionFactorKgPerL: 2.68,
-      calculatedKgCO2e: 240 * 2.68,
-      calculatedTCO2e: Number(((240 * 2.68) / 1000).toFixed(4)),
-      status: 'Verified',
-      remarks: 'Breakdown response and transformer maintenance team',
-      createdAt: '2025-02-03T10:00:00Z',
-      updatedAt: '2025-02-03T10:00:00Z'
-    },
-    {
-      id: 'veh-4',
-      facilityId: 'fac-4',
-      facilityName: 'Moratuwa Branch Office',
-      reportingYear: 2025,
-      month: 'February',
-      responsibleOfficer: 'Mr. Kusal Fernando',
-      vehicleNo: 'WP-BD-9011',
-      vehicleType: 'Motorcycle',
-      fuelType: 'Petrol (Gasoline)',
-      quantityLiters: 65,
-      distanceKm: 2100,
-      fuelCardNo: 'FC-339102',
-      emissionFactorKgPerL: 2.31,
-      calculatedKgCO2e: 65 * 2.31,
-      calculatedTCO2e: Number(((65 * 2.31) / 1000).toFixed(4)),
-      status: 'Approved',
-      remarks: 'Meter reading and billing distribution rounds',
-      createdAt: '2025-03-01T08:00:00Z',
-      updatedAt: '2025-03-01T08:00:00Z'
-    },
-    {
-      id: 'veh-5',
-      facilityId: 'fac-6',
-      facilityName: 'Negombo Branch & Operations',
-      reportingYear: 2025,
-      month: 'February',
-      responsibleOfficer: 'Eng. Priyantha Dissanayake',
-      vehicleNo: 'WP-PH-5120',
-      vehicleType: 'Van',
-      fuelType: 'Auto Diesel',
-      quantityLiters: 195,
-      distanceKm: 1680,
-      fuelCardNo: 'FC-661902',
-      emissionFactorKgPerL: 2.68,
-      calculatedKgCO2e: 195 * 2.68,
-      calculatedTCO2e: Number(((195 * 2.68) / 1000).toFixed(4)),
-      status: 'Approved',
-      remarks: 'Customer connection inspection vehicle',
-      createdAt: '2025-03-02T11:00:00Z',
-      updatedAt: '2025-03-02T11:00:00Z'
-    }
-  ];
+export const INITIAL_SCOPE2_RECORDS: Scope2Record[] = [
+  {
+    id: 's2-101',
+    facilityId: 'fac-ho-colombo',
+    facilityName: 'LECO Head Office',
+    accountNumber: 'ACC-010-9882',
+    meterNumber: 'MTR-COL-001',
+    gridConsumptionKWh: 42000,
+    solarGenerationKWh: 9500,
+    solarExportKWh: 1200,
+    netPurchasedKWh: 33700,
+    gridEmissionFactorKgCO2ePerKWh: 0.655,
+    totalEmissionsKgCO2e: 22073.5,
+    totalEmissionsTonsCO2e: 22.07,
+    solarOffsetKgCO2e: 6222.5,
+    reportingMonth: '01',
+    reportingYear: 2024,
+    costLKR: 1850000,
+    createdBy: 'Samantha Perera',
+    createdAt: '2024-01-31T17:00:00Z'
+  },
+  {
+    id: 's2-102',
+    facilityId: 'fac-br-kotte',
+    facilityName: 'Kotte Branch',
+    accountNumber: 'ACC-011-3341',
+    meterNumber: 'MTR-KT-09',
+    gridConsumptionKWh: 14500,
+    solarGenerationKWh: 4200,
+    solarExportKWh: 600,
+    netPurchasedKWh: 10900,
+    gridEmissionFactorKgCO2ePerKWh: 0.655,
+    totalEmissionsKgCO2e: 7139.5,
+    totalEmissionsTonsCO2e: 7.14,
+    solarOffsetKgCO2e: 2751.0,
+    reportingMonth: '01',
+    reportingYear: 2024,
+    costLKR: 620000,
+    createdBy: 'Dilani Senanayake',
+    createdAt: '2024-01-31T17:30:00Z'
+  },
+  {
+    id: 's2-103',
+    facilityId: 'fac-csc-pitakotte',
+    facilityName: 'Pitakotte CSC',
+    accountNumber: 'ACC-011-3342',
+    meterNumber: 'MTR-PKT-01',
+    gridConsumptionKWh: 3200,
+    solarGenerationKWh: 0,
+    solarExportKWh: 0,
+    netPurchasedKWh: 3200,
+    gridEmissionFactorKgCO2ePerKWh: 0.655,
+    totalEmissionsKgCO2e: 2096.0,
+    totalEmissionsTonsCO2e: 2.10,
+    solarOffsetKgCO2e: 0,
+    reportingMonth: '01',
+    reportingYear: 2024,
+    costLKR: 176000,
+    createdBy: 'Sarath Wijesinghe',
+    createdAt: '2024-01-31T18:00:00Z'
+  },
+  {
+    id: 's2-104',
+    facilityId: 'fac-br-kelaniya',
+    facilityName: 'Kelaniya Branch',
+    accountNumber: 'ACC-011-5511',
+    meterNumber: 'MTR-KLN-BR01',
+    gridConsumptionKWh: 18200,
+    solarGenerationKWh: 5600,
+    solarExportKWh: 800,
+    netPurchasedKWh: 13400,
+    gridEmissionFactorKgCO2ePerKWh: 0.655,
+    totalEmissionsKgCO2e: 8777.0,
+    totalEmissionsTonsCO2e: 8.78,
+    solarOffsetKgCO2e: 3668.0,
+    reportingMonth: '01',
+    reportingYear: 2024,
+    costLKR: 790000,
+    createdBy: 'Rohan Samarasinghe',
+    createdAt: '2024-01-31T18:30:00Z'
+  }
+];
 
-  // Generators
-  const scope1Generators: Scope1GeneratorRecord[] = [
-    {
-      id: 'gen-1',
-      facilityId: 'fac-1',
-      facilityName: 'LECO Head Office',
-      reportingYear: 2025,
-      month: 'January',
-      responsibleOfficer: 'Mr. Samantha Perera',
-      generatorId: 'GEN-HO-500KVA',
-      capacityKVA: 500,
-      fuelType: 'Diesel',
-      quantityLiters: 210,
-      operatingHours: 14.5,
-      maintenanceType: 'Monthly testing & CEB grid maintenance cutover',
-      emissionFactorKgPerL: 2.68,
-      calculatedKgCO2e: 210 * 2.68,
-      calculatedTCO2e: Number(((210 * 2.68) / 1000).toFixed(4)),
-      status: 'Approved',
-      remarks: 'Automatic emergency generator backup',
-      createdAt: '2025-02-01T09:00:00Z',
-      updatedAt: '2025-02-01T09:00:00Z'
-    },
-    {
-      id: 'gen-2',
-      facilityId: 'fac-2',
-      facilityName: 'LECO Meter Testing & Assembly Factory',
-      reportingYear: 2025,
-      month: 'January',
-      responsibleOfficer: 'Eng. Ruwan Jayasuriya',
-      generatorId: 'GEN-MF-250KVA',
-      capacityKVA: 250,
-      fuelType: 'Diesel',
-      quantityLiters: 165,
-      operatingHours: 18.0,
-      maintenanceType: 'Routine 250hr servicing and load test',
-      emissionFactorKgPerL: 2.68,
-      calculatedKgCO2e: 165 * 2.68,
-      calculatedTCO2e: Number(((165 * 2.68) / 1000).toFixed(4)),
-      status: 'Approved',
-      remarks: 'Ensuring continuous high-precision calibration test bench power',
-      createdAt: '2025-02-02T10:00:00Z',
-      updatedAt: '2025-02-02T10:00:00Z'
-    }
-  ];
+export const INITIAL_SCOPE3_RECORDS: Scope3Record[] = [
+  {
+    id: 's3-101',
+    facilityId: 'fac-mf-bandaragama',
+    facilityName: 'LECO Meter Testing & Assembly Factory',
+    category: 'Purchased Goods & Services',
+    activityName: 'Smart Meter Electronic Microcontroller Components',
+    activityData: 2500,
+    unit: 'units',
+    emissionFactor: 8.5,
+    emissionFactorUnit: 'kg CO2e / unit',
+    totalEmissionsKgCO2e: 21250.0,
+    totalEmissionsTonsCO2e: 21.25,
+    reportingMonth: '01',
+    reportingYear: 2024,
+    methodology: 'Supplier LCA verification & carbon certificate',
+    createdBy: 'Ruwan Jayasuriya',
+    createdAt: '2024-01-25T14:00:00Z'
+  },
+  {
+    id: 's3-102',
+    facilityId: 'fac-st-waskaduwa',
+    facilityName: 'Stores - Waskaduwa',
+    category: 'Capital Goods',
+    activityName: 'Procurement of Step-down 33kV/11kV Distribution Transformers',
+    activityData: 12000,
+    unit: 'kg',
+    emissionFactor: 4.2,
+    emissionFactorUnit: 'kg CO2e / kg',
+    totalEmissionsKgCO2e: 50400.0,
+    totalEmissionsTonsCO2e: 50.40,
+    reportingMonth: '02',
+    reportingYear: 2024,
+    methodology: 'LECO Transformer Environmental LCA Specification',
+    createdBy: 'Nimal Wickramasinghe',
+    createdAt: '2024-02-18T10:00:00Z'
+  },
+  {
+    id: 's3-103',
+    facilityId: 'fac-ho-colombo',
+    facilityName: 'LECO Head Office',
+    category: 'Employee Commuting',
+    activityName: 'Head Office Staff Daily Commuting (180 employees)',
+    activityData: 72000,
+    unit: 'passenger-km',
+    emissionFactor: 0.089,
+    emissionFactorUnit: 'kg CO2e / passenger-km',
+    totalEmissionsKgCO2e: 6408.0,
+    totalEmissionsTonsCO2e: 6.41,
+    reportingMonth: '01',
+    reportingYear: 2024,
+    methodology: 'Annual employee transport survey & average distance methodology',
+    createdBy: 'Samantha Perera',
+    createdAt: '2024-01-30T16:00:00Z'
+  }
+];
 
-  // Stationary & LPG
-  const scope1Stationary: Scope1StationaryFuelRecord[] = [
-    {
-      id: 'stat-1',
-      facilityId: 'fac-1',
-      facilityName: 'LECO Head Office',
-      reportingYear: 2025,
-      month: 'January',
-      responsibleOfficer: 'Mr. Samantha Perera',
-      itemEquipment: 'Staff Cafeteria & Kitchen',
-      fuelType: 'LPG (Commercial 37.5kg)',
-      quantity: 150, // 4 x 37.5kg = 150kg
-      unit: 'kg',
-      emissionFactorKgPerUnit: 2.98,
-      calculatedKgCO2e: 150 * 2.98,
-      calculatedTCO2e: Number(((150 * 2.98) / 1000).toFixed(4)),
-      status: 'Approved',
-      remarks: 'Commercial LPG cylinders for staff meal preparation',
-      createdAt: '2025-02-01T10:00:00Z',
-      updatedAt: '2025-02-01T10:00:00Z'
-    },
-    {
-      id: 'stat-2',
-      facilityId: 'fac-2',
-      facilityName: 'LECO Meter Testing & Assembly Factory',
-      reportingYear: 2025,
-      month: 'January',
-      responsibleOfficer: 'Eng. Ruwan Jayasuriya',
-      itemEquipment: 'Meter Casing Ultrasonic Welding & Heat Shrink Chamber',
-      fuelType: 'LPG (Commercial 37.5kg)',
-      quantity: 75,
-      unit: 'kg',
-      emissionFactorKgPerUnit: 2.98,
-      calculatedKgCO2e: 75 * 2.98,
-      calculatedTCO2e: Number(((75 * 2.98) / 1000).toFixed(4)),
-      status: 'Approved',
-      remarks: 'Assembly production process heat',
-      createdAt: '2025-02-02T10:30:00Z',
-      updatedAt: '2025-02-02T10:30:00Z'
-    }
-  ];
-
-  // Refrigerants
-  const scope1Refrigerants: Scope1RefrigerantRecord[] = [
-    {
-      id: 'ref-1',
-      facilityId: 'fac-1',
-      facilityName: 'LECO Head Office',
-      reportingYear: 2025,
-      month: 'January',
-      responsibleOfficer: 'Mr. Samantha Perera',
-      equipmentType: 'VRF / Chiller System',
-      equipmentLocation: '4th Floor Server & Data Room',
-      equipmentCount: 2,
-      refrigerantType: 'R-410A',
-      quantityRefilledKg: 4.5,
-      reasonForRefill: 'Routine Maintenance',
-      gwpFactor: 2088,
-      calculatedKgCO2e: 4.5 * 2088,
-      calculatedTCO2e: Number(((4.5 * 2088) / 1000).toFixed(4)),
-      status: 'Approved',
-      remarks: 'Annual HVAC maintenance and pressure top-up',
-      createdAt: '2025-02-01T11:00:00Z',
-      updatedAt: '2025-02-01T11:00:00Z'
-    },
-    {
-      id: 'ref-2',
-      facilityId: 'fac-2',
-      facilityName: 'LECO Meter Testing & Assembly Factory',
-      reportingYear: 2025,
-      month: 'February',
-      responsibleOfficer: 'Eng. Ruwan Jayasuriya',
-      equipmentType: 'Split Air Conditioner',
-      equipmentLocation: 'Cleanroom Calibration Lab',
-      equipmentCount: 4,
-      refrigerantType: 'R-32',
-      quantityRefilledKg: 2.2,
-      reasonForRefill: 'Leakage Repair',
-      gwpFactor: 675,
-      calculatedKgCO2e: 2.2 * 675,
-      calculatedTCO2e: Number(((2.2 * 675) / 1000).toFixed(4)),
-      status: 'Approved',
-      remarks: 'Flare nut leak fixed and refilled to manufacturer specification',
-      createdAt: '2025-03-01T10:00:00Z',
-      updatedAt: '2025-03-01T10:00:00Z'
-    }
-  ];
-
-  // SF6 High Voltage Electrical Equipment
-  const scope1SF6: Scope1SF6Record[] = [
-    {
-      id: 'sf6-1',
-      facilityId: 'fac-1',
-      facilityName: 'LECO Head Office',
-      reportingYear: 2025,
-      month: 'January',
-      responsibleOfficer: 'Mr. Samantha Perera',
-      equipmentId: 'GIS-CB-33KV-01',
-      equipmentType: 'Gas Insulated Switchgear (GIS)',
-      voltageLevelKV: '33 kV',
-      nameplateCapacityKg: 25.0,
-      beginningInventoryKg: 12.0,
-      inventoryPurchasedRefilledKg: 1.5,
-      inventoryRecoveredKg: 0.0,
-      endingInventoryKg: 12.5,
-      netLossKg: 1.0, // (12.0 + 1.5 - 0 - 12.5) = 1.0 kg leakage
-      gwpFactor: 23500,
-      calculatedKgCO2e: 1.0 * 23500,
-      calculatedTCO2e: Number(((1.0 * 23500) / 1000).toFixed(4)),
-      status: 'Approved',
-      remarks: 'Primary distribution substation switchgear chamber top-up',
-      createdAt: '2025-02-01T12:00:00Z',
-      updatedAt: '2025-02-01T12:00:00Z'
-    }
-  ];
-
-  // Scope 2: Electricity
-  const scope2Electricity: Scope2ElectricityRecord[] = [
-    {
-      id: 'elec-1',
-      facilityId: 'fac-1',
-      facilityName: 'LECO Head Office',
-      reportingYear: 2025,
-      month: 'January',
-      responsibleOfficer: 'Mr. Samantha Perera',
-      accountNumber: 'ACC-010-9882',
-      meterNumber: 'MTR-COL-001',
-      tariffCategory: 'Commercial / Industrial General',
-      consumedKWh: 38400,
-      billedAmountLKR: 2457600,
-      gridEmissionFactorKgPerKWh: 0.655,
-      calculatedKgCO2e: 38400 * 0.655,
-      calculatedTCO2e: Number(((38400 * 0.655) / 1000).toFixed(4)),
-      status: 'Approved',
-      remarks: 'Head Office 7-story building main meter',
-      createdAt: '2025-02-05T09:00:00Z',
-      updatedAt: '2025-02-05T09:00:00Z'
-    },
-    {
-      id: 'elec-2',
-      facilityId: 'fac-2',
-      facilityName: 'LECO Meter Testing & Assembly Factory',
-      reportingYear: 2025,
-      month: 'January',
-      responsibleOfficer: 'Eng. Ruwan Jayasuriya',
-      accountNumber: 'ACC-038-7711',
-      meterNumber: 'MTR-MF-101',
-      tariffCategory: 'Industrial Medium Voltage',
-      consumedKWh: 29500,
-      billedAmountLKR: 1888000,
-      gridEmissionFactorKgPerKWh: 0.655,
-      calculatedKgCO2e: 29500 * 0.655,
-      calculatedTCO2e: Number(((29500 * 0.655) / 1000).toFixed(4)),
-      status: 'Approved',
-      remarks: 'Meter factory automated assembly lines & test bays',
-      createdAt: '2025-02-05T10:00:00Z',
-      updatedAt: '2025-02-05T10:00:00Z'
-    },
-    {
-      id: 'elec-3',
-      facilityId: 'fac-3',
-      facilityName: 'Kotte Branch & Customer Service Centre',
-      reportingYear: 2025,
-      month: 'January',
-      responsibleOfficer: 'Mrs. Dilani Senanayake',
-      accountNumber: 'ACC-011-3341',
-      meterNumber: 'MTR-KT-09',
-      tariffCategory: 'Commercial',
-      consumedKWh: 7800,
-      billedAmountLKR: 499200,
-      gridEmissionFactorKgPerKWh: 0.655,
-      calculatedKgCO2e: 7800 * 0.655,
-      calculatedTCO2e: Number(((7800 * 0.655) / 1000).toFixed(4)),
-      status: 'Approved',
-      remarks: 'Branch CSC office and bill collection counters',
-      createdAt: '2025-02-06T11:00:00Z',
-      updatedAt: '2025-02-06T11:00:00Z'
-    },
-    {
-      id: 'elec-4',
-      facilityId: 'fac-4',
-      facilityName: 'Moratuwa Branch Office',
-      reportingYear: 2025,
-      month: 'January',
-      responsibleOfficer: 'Mr. Kusal Fernando',
-      accountNumber: 'ACC-011-4567',
-      meterNumber: 'MTR-MR-22',
-      tariffCategory: 'Commercial',
-      consumedKWh: 6400,
-      billedAmountLKR: 409600,
-      gridEmissionFactorKgPerKWh: 0.655,
-      calculatedKgCO2e: 6400 * 0.655,
-      calculatedTCO2e: Number(((6400 * 0.655) / 1000).toFixed(4)),
-      status: 'Approved',
-      remarks: 'Moratuwa customer service & engineering depot',
-      createdAt: '2025-02-06T14:00:00Z',
-      updatedAt: '2025-02-06T14:00:00Z'
-    },
-    {
-      id: 'elec-5',
-      facilityId: 'fac-5',
-      facilityName: 'Kalutara Branch & CSC',
-      reportingYear: 2025,
-      month: 'January',
-      responsibleOfficer: 'Mr. Asanka Weerakkody',
-      accountNumber: 'ACC-034-8890',
-      meterNumber: 'MTR-KL-05',
-      tariffCategory: 'Commercial',
-      consumedKWh: 5900,
-      billedAmountLKR: 377600,
-      gridEmissionFactorKgPerKWh: 0.655,
-      calculatedKgCO2e: 5900 * 0.655,
-      calculatedTCO2e: Number(((5900 * 0.655) / 1000).toFixed(4)),
-      status: 'Approved',
-      remarks: 'Kalutara branch building',
-      createdAt: '2025-02-07T09:00:00Z',
-      updatedAt: '2025-02-07T09:00:00Z'
-    },
-    {
-      id: 'elec-6',
-      facilityId: 'fac-6',
-      facilityName: 'Negombo Branch & Operations',
-      reportingYear: 2025,
-      month: 'January',
-      responsibleOfficer: 'Eng. Priyantha Dissanayake',
-      accountNumber: 'ACC-031-1029',
-      meterNumber: 'MTR-NG-44',
-      tariffCategory: 'Commercial',
-      consumedKWh: 8200,
-      billedAmountLKR: 524800,
-      gridEmissionFactorKgPerKWh: 0.655,
-      calculatedKgCO2e: 8200 * 0.655,
-      calculatedTCO2e: Number(((8200 * 0.655) / 1000).toFixed(4)),
-      status: 'Approved',
-      remarks: 'Negombo regional control centre',
-      createdAt: '2025-02-07T11:00:00Z',
-      updatedAt: '2025-02-07T11:00:00Z'
-    }
-  ];
-
-  // Scope 2: Solar PV Generation
-  const scope2Solar: Scope2SolarRecord[] = [
-    {
-      id: 'sol-1',
-      facilityId: 'fac-1',
-      facilityName: 'LECO Head Office',
-      reportingYear: 2025,
-      month: 'January',
-      responsibleOfficer: 'Mr. Samantha Perera',
-      systemCapacityKWp: 75.0,
-      solarGeneratedKWh: 9450,
-      selfConsumedKWh: 8200,
-      exportedToGridKWh: 1250,
-      importedFromGridKWh: 30200,
-      avoidedEmissionsTCO2e: Number(((9450 * 0.655) / 1000).toFixed(4)),
-      netPurchasedKWh: 30200 - 1250,
-      netScope2EmissionsTCO2e: Number((((30200 - 1250) * 0.655) / 1000).toFixed(4)),
-      status: 'Approved',
-      remarks: 'Rooftop Solar PV net-accounting scheme',
-      createdAt: '2025-02-05T09:30:00Z',
-      updatedAt: '2025-02-05T09:30:00Z'
-    },
-    {
-      id: 'sol-2',
-      facilityId: 'fac-2',
-      facilityName: 'LECO Meter Testing & Assembly Factory',
-      reportingYear: 2025,
-      month: 'January',
-      responsibleOfficer: 'Eng. Ruwan Jayasuriya',
-      systemCapacityKWp: 120.0,
-      solarGeneratedKWh: 15120,
-      selfConsumedKWh: 14200,
-      exportedToGridKWh: 920,
-      importedFromGridKWh: 15300,
-      avoidedEmissionsTCO2e: Number(((15120 * 0.655) / 1000).toFixed(4)),
-      netPurchasedKWh: 15300 - 920,
-      netScope2EmissionsTCO2e: Number((((15300 - 920) * 0.655) / 1000).toFixed(4)),
-      status: 'Approved',
-      remarks: 'Bandaragama factory rooftop installation',
-      createdAt: '2025-02-05T10:30:00Z',
-      updatedAt: '2025-02-05T10:30:00Z'
-    }
-  ];
-
-  // Scope 3: Purchased Goods
-  const scope3PurchasedGoods: Scope3PurchasedGoodsRecord[] = [
-    {
-      id: 'pg-1',
-      facilityId: 'fac-7',
-      facilityName: 'Central Logistics & Materials Store',
-      reportingYear: 2025,
-      month: 'January',
-      responsibleOfficer: 'Mr. Nimal Wickramasinghe',
-      category: 'Cables & Conductors',
-      itemDescription: 'All-Aluminium Alloy Conductor (AAAC) 100mm² & Aerial Bundled Cables',
-      quantity: 45,
-      unit: 'Kilometers',
-      supplierName: 'Kelani Cables PLC',
-      valueLKR: 18500000,
-      spendEmissionFactorKgPer1000LKR: 0.48,
-      calculatedKgCO2e: (18500000 / 1000) * 0.48,
-      calculatedTCO2e: Number((((18500000 / 1000) * 0.48) / 1000).toFixed(4)),
-      status: 'Approved',
-      remarks: 'Medium voltage distribution line reinforcement stock',
-      createdAt: '2025-02-10T09:00:00Z',
-      updatedAt: '2025-02-10T09:00:00Z'
-    },
-    {
-      id: 'pg-2',
-      facilityId: 'fac-2',
-      facilityName: 'LECO Meter Testing & Assembly Factory',
-      reportingYear: 2025,
-      month: 'January',
-      responsibleOfficer: 'Eng. Ruwan Jayasuriya',
-      category: 'Electricity Meters & Testing',
-      itemDescription: 'Smart Meter Electronic Microcontroller Modules & Polycarbonate Enclosures',
-      quantity: 5000,
-      unit: 'Units',
-      supplierName: 'LECO-Antek Meter JV (Pvt) Ltd',
-      valueLKR: 12400000,
-      spendEmissionFactorKgPer1000LKR: 0.45,
-      calculatedKgCO2e: (12400000 / 1000) * 0.45,
-      calculatedTCO2e: Number((((12400000 / 1000) * 0.45) / 1000).toFixed(4)),
-      status: 'Approved',
-      remarks: 'Single phase smart energy meter assembly components',
-      createdAt: '2025-02-10T11:00:00Z',
-      updatedAt: '2025-02-10T11:00:00Z'
-    }
-  ];
-
-  // Scope 3: Capital Goods
-  const scope3CapitalGoods: Scope3CapitalGoodsRecord[] = [
-    {
-      id: 'cg-1',
-      facilityId: 'fac-7',
-      facilityName: 'Central Logistics & Materials Store',
-      reportingYear: 2025,
-      month: 'January',
-      responsibleOfficer: 'Mr. Nimal Wickramasinghe',
-      assetName: '11kV / 400V 500kVA Distribution Transformers (Mineral Oil Immersed)',
-      assetType: 'Distribution Transformers',
-      quantity: 8,
-      supplier: 'LTL Transformers (Pvt) Ltd',
-      valueLKR: 28800000,
-      depreciationYears: 20,
-      spendEmissionFactorKgPer1000LKR: 0.52,
-      calculatedKgCO2e: (28800000 / 1000) * 0.52,
-      calculatedTCO2e: Number((((28800000 / 1000) * 0.52) / 1000).toFixed(4)),
-      status: 'Approved',
-      remarks: 'Capitalized substations for Colombo South network reliability',
-      createdAt: '2025-02-12T09:00:00Z',
-      updatedAt: '2025-02-12T09:00:00Z'
-    }
-  ];
-
-  // Scope 3: Construction & Infrastructure
-  const scope3Construction: Scope3ConstructionRecord[] = [
-    {
-      id: 'const-1',
-      facilityId: 'fac-3',
-      facilityName: 'Kotte Branch & Customer Service Centre',
-      reportingYear: 2025,
-      month: 'January',
-      responsibleOfficer: 'Mrs. Dilani Senanayake',
-      projectName: 'Rajagiriya-Kotte Underground 33kV Cable Ducting Project',
-      projectType: 'Underground Cabling',
-      contractorName: 'Sierra Construction (Pvt) Ltd',
-      constructionPeriodMonths: 8,
-      projectValueLKR: 42000000,
-      majorMaterialsSummary: 'Trenching, concrete ducts, backfill gravel, asphalt resurfacing',
-      calculatedKgCO2e: (42000000 / 1000) * 0.38,
-      calculatedTCO2e: Number((((42000000 / 1000) * 0.38) / 1000).toFixed(4)),
-      status: 'Approved',
-      remarks: 'Urban power aesthetic & reliability underground conversion',
-      createdAt: '2025-02-14T10:00:00Z',
-      updatedAt: '2025-02-14T10:00:00Z'
-    }
-  ];
-
-  // Scope 3: Upstream Freight
-  const scope3UpstreamFreight: Scope3UpstreamFreightRecord[] = [
-    {
-      id: 'frt-1',
-      facilityId: 'fac-7',
-      facilityName: 'Central Logistics & Materials Store',
-      reportingYear: 2025,
-      month: 'January',
-      responsibleOfficer: 'Mr. Nimal Wickramasinghe',
-      materialDescription: 'Bulk Transformer Oil & Galvanized Steel Poles',
-      origin: 'Colombo Port Container Terminal',
-      destination: 'Central Store Kotikawatta',
-      weightTonnes: 38.5,
-      distanceKm: 28,
-      transportMode: 'Heavy Diesel Truck (14t+)',
-      emissionFactorKgPerTonneKm: 0.162,
-      calculatedKgCO2e: 38.5 * 28 * 0.162,
-      calculatedTCO2e: Number(((38.5 * 28 * 0.162) / 1000).toFixed(4)),
-      status: 'Approved',
-      remarks: 'Direct logistics delivery from port clearance',
-      createdAt: '2025-02-15T09:00:00Z',
-      updatedAt: '2025-02-15T09:00:00Z'
-    }
-  ];
-
-  // Scope 3: Waste
-  const scope3Waste: Scope3WasteRecord[] = [
-    {
-      id: 'wst-1',
-      facilityId: 'fac-7',
-      facilityName: 'Central Logistics & Materials Store',
-      reportingYear: 2025,
-      month: 'January',
-      responsibleOfficer: 'Mr. Nimal Wickramasinghe',
-      wasteType: 'Scrap Copper & Aluminum',
-      quantityKg: 3200,
-      disposalMethod: 'Authorized Certified Recycling',
-      contractorName: 'Green Metals Recycling Sri Lanka Ltd',
-      emissionFactorKgPerKg: -0.22,
-      calculatedKgCO2e: 3200 * -0.22,
-      calculatedTCO2e: Number(((3200 * -0.22) / 1000).toFixed(4)),
-      status: 'Approved',
-      remarks: 'Decommissioned distribution line conductor recycling (Avoided emissions credit)',
-      createdAt: '2025-02-16T14:00:00Z',
-      updatedAt: '2025-02-16T14:00:00Z'
-    },
-    {
-      id: 'wst-2',
-      facilityId: 'fac-1',
-      facilityName: 'LECO Head Office',
-      reportingYear: 2025,
-      month: 'January',
-      responsibleOfficer: 'Mr. Samantha Perera',
-      wasteType: 'Mixed Municipal Solid Waste',
-      quantityKg: 850,
-      disposalMethod: 'Controlled Landfill',
-      contractorName: 'Colombo Municipal Council (CMC)',
-      emissionFactorKgPerKg: 0.58,
-      calculatedKgCO2e: 850 * 0.58,
-      calculatedTCO2e: Number(((850 * 0.58) / 1000).toFixed(4)),
-      status: 'Approved',
-      remarks: 'Head office non-recyclable general waste',
-      createdAt: '2025-02-16T15:00:00Z',
-      updatedAt: '2025-02-16T15:00:00Z'
-    }
-  ];
-
-  // Scope 3: Business Travel & Commuting
-  const scope3BusinessTravel: Scope3BusinessTravelRecord[] = [
-    {
-      id: 'trv-1',
-      facilityId: 'fac-1',
-      facilityName: 'LECO Head Office',
-      reportingYear: 2025,
-      month: 'January',
-      responsibleOfficer: 'Mr. Samantha Perera',
-      travelCategory: 'Business Travel',
-      purposeOrEmployeeGroup: 'IEEE Smart Grid Power Systems Conference Delegation',
-      origin: 'Colombo (CMB)',
-      destination: 'Singapore (SIN)',
-      transportMode: 'International Air Flight',
-      numberOfTrips: 3,
-      distanceKmPerTrip: 2750,
-      totalPassengerKm: 3 * 2750,
-      emissionFactorKgPerPassengerKm: 0.102,
-      calculatedKgCO2e: 3 * 2750 * 0.102,
-      calculatedTCO2e: Number(((3 * 2750 * 0.102) / 1000).toFixed(4)),
-      status: 'Approved',
-      remarks: 'Executive engineering team smart metering delegation',
-      createdAt: '2025-02-18T09:00:00Z',
-      updatedAt: '2025-02-18T09:00:00Z'
-    },
-    {
-      id: 'trv-2',
-      facilityId: 'fac-1',
-      facilityName: 'LECO Head Office',
-      reportingYear: 2025,
-      month: 'January',
-      responsibleOfficer: 'Mr. Samantha Perera',
-      travelCategory: 'Employee Commuting',
-      purposeOrEmployeeGroup: 'Head Office Staff Daily Commuting Survey',
-      origin: 'Colombo Suburbs (Piliyandala, Maharagama, Kadawatha)',
-      destination: 'Kollupitiya Head Office',
-      transportMode: 'Public Bus',
-      numberOfTrips: 550,
-      distanceKmPerTrip: 18,
-      totalPassengerKm: 550 * 18,
-      emissionFactorKgPerPassengerKm: 0.042,
-      calculatedKgCO2e: 550 * 18 * 0.042,
-      calculatedTCO2e: Number(((550 * 18 * 0.042) / 1000).toFixed(4)),
-      status: 'Approved',
-      remarks: 'Aggregated monthly employee commuting survey results',
-      createdAt: '2025-02-18T10:00:00Z',
-      updatedAt: '2025-02-18T10:00:00Z'
-    }
-  ];
-
-  // Scope 3: Distribution Technical & Commercial Losses
-  const scope3DistributionLoss: Scope3DistributionLossRecord[] = [
-    {
-      id: 'loss-1',
-      facilityId: 'fac-1',
-      facilityName: 'LECO Head Office',
-      reportingYear: 2025,
-      month: 'January',
-      responsibleOfficer: 'Mr. Samantha Perera',
-      electricityReceivedFromCEBMWh: 145000,
-      lecoOwnConsumptionMWh: 105,
-      electricityBilledToConsumersMWh: 139200,
-      distributionLossMWh: 145000 - 105 - 139200, // 5695 MWh
-      lossPercentage: Number((((145000 - 105 - 139200) / 145000) * 100).toFixed(2)), // ~3.93% (LECO world class low loss rate)
-      gridEmissionFactorTonnePerMWh: 0.655,
-      calculatedKgCO2e: (145000 - 105 - 139200) * 0.655 * 1000,
-      calculatedTCO2e: Number(((145000 - 105 - 139200) * 0.655).toFixed(4)),
-      status: 'Approved',
-      remarks: 'LECO Low-Loss Distribution Grid (3.93% Technical & Commercial Loss)',
-      createdAt: '2025-02-20T09:00:00Z',
-      updatedAt: '2025-02-20T09:00:00Z'
-    }
-  ];
-
-  return {
-    facilities: DEFAULT_FACILITIES,
-    users: DEFAULT_USERS,
-    emissionFactors: DEFAULT_EMISSION_FACTORS,
-    scope1Vehicles,
-    scope1Generators,
-    scope1Stationary,
-    scope1Refrigerants,
-    scope1SF6,
-    scope2Electricity,
-    scope2Solar,
-    scope3PurchasedGoods,
-    scope3CapitalGoods,
-    scope3Construction,
-    scope3UpstreamFreight,
-    scope3Waste,
-    scope3BusinessTravel,
-    scope3DistributionLoss
+class DatabaseStore {
+  private data: {
+    facilities: Facility[];
+    users: User[];
+    emissionFactors: EmissionFactor[];
+    scope1: Scope1Record[];
+    scope2: Scope2Record[];
+    scope3: Scope3Record[];
   };
-}
-
-class DatabaseManager {
-  private data: DatabaseSchema;
 
   constructor() {
     this.data = this.loadData();
   }
 
-  private loadData(): DatabaseSchema {
+  private loadData() {
     try {
       if (fs.existsSync(DATA_FILE)) {
         const raw = fs.readFileSync(DATA_FILE, 'utf-8');
         const parsed = JSON.parse(raw);
-        
-        // Ensure root super admin is always present and immutable
+
+        // Ensure Root Super Admin is always present
         if (parsed.users) {
-          const rootAdminIndex = parsed.users.findIndex((u: User) => u.email?.toLowerCase() === 'superadmincf@leco.com');
-          if (rootAdminIndex === -1) {
+          const rootIdx = parsed.users.findIndex((u: User) => u.email?.toLowerCase() === 'superadmincf@leco.com');
+          if (rootIdx === -1) {
             parsed.users.unshift(DEFAULT_USERS[0]);
           } else {
-            parsed.users[rootAdminIndex] = {
-              ...parsed.users[rootAdminIndex],
+            parsed.users[rootIdx] = {
+              ...DEFAULT_USERS[0],
+              ...parsed.users[rootIdx],
               role: 'super_admin',
               canDelete: true,
-              isImmutableRootAdmin: true,
-              email: 'superadmincf@leco.com',
               isActive: true
             };
           }
@@ -1717,11 +1200,10 @@ class DatabaseManager {
           parsed.users = DEFAULT_USERS;
         }
 
-        // Ensure hierarchical facilities are present with jobRoles and parent IDs
+        // Ensure hierarchical facilities exist
         if (!parsed.facilities || parsed.facilities.length < DEFAULT_FACILITIES.length) {
           parsed.facilities = DEFAULT_FACILITIES;
         } else {
-          // Merge missing default hierarchical facilities
           DEFAULT_FACILITIES.forEach(defFac => {
             const existingIdx = parsed.facilities.findIndex((f: Facility) => f.id === defFac.id || f.code === defFac.code);
             if (existingIdx === -1) {
@@ -1740,223 +1222,226 @@ class DatabaseManager {
             }
           });
         }
+
+        if (!parsed.emissionFactors) parsed.emissionFactors = DEFAULT_EMISSION_FACTORS;
+        if (!parsed.scope1) parsed.scope1 = INITIAL_SCOPE1_RECORDS;
+        if (!parsed.scope2) parsed.scope2 = INITIAL_SCOPE2_RECORDS;
+        if (!parsed.scope3) parsed.scope3 = INITIAL_SCOPE3_RECORDS;
+
         return parsed;
       }
     } catch (e) {
-      console.error('Error loading data from disk, initializing fresh:', e);
+      console.warn('Could not read persistent file, fallback to defaults:', e);
     }
-    const initial = generateInitialRecords();
-    this.saveData(initial);
-    return initial;
+
+    return {
+      facilities: DEFAULT_FACILITIES,
+      users: DEFAULT_USERS,
+      emissionFactors: DEFAULT_EMISSION_FACTORS,
+      scope1: INITIAL_SCOPE1_RECORDS,
+      scope2: INITIAL_SCOPE2_RECORDS,
+      scope3: INITIAL_SCOPE3_RECORDS
+    };
   }
 
-  public saveData(customData?: DatabaseSchema): void {
+  public save() {
     try {
-      const toSave = customData || this.data;
-      fs.writeFileSync(DATA_FILE, JSON.stringify(toSave, null, 2), 'utf-8');
+      fs.writeFileSync(DATA_FILE, JSON.stringify(this.data, null, 2), 'utf-8');
     } catch (e) {
-      console.error('Error writing database to disk:', e);
+      console.error('Error saving data to file:', e);
     }
   }
 
-  public getRawData(): DatabaseSchema {
-    return this.data;
-  }
-
-  public resetToDefault(): DatabaseSchema {
-    this.data = generateInitialRecords();
-    this.saveData();
-    return this.data;
-  }
-
-  // Facilities
+  // Facilities CRUD
   public getFacilities(): Facility[] {
     return this.data.facilities;
   }
 
   public addFacility(facility: Facility): Facility {
-    if (!facility.jobRoles) {
-      facility.jobRoles = [];
+    // If it has a parentId, populate parentName
+    if (facility.parentId) {
+      const parent = this.data.facilities.find(f => f.id === facility.parentId);
+      if (parent) {
+        facility.parentName = parent.name;
+      }
     }
     this.data.facilities.push(facility);
-    this.saveData();
+    this.save();
     return facility;
   }
 
   public updateFacility(id: string, updates: Partial<Facility>): Facility | null {
     const idx = this.data.facilities.findIndex(f => f.id === id);
     if (idx === -1) return null;
+    
+    if (updates.parentId) {
+      const parent = this.data.facilities.find(f => f.id === updates.parentId);
+      if (parent) updates.parentName = parent.name;
+    }
+
     this.data.facilities[idx] = { ...this.data.facilities[idx], ...updates };
-    this.saveData();
+    this.save();
     return this.data.facilities[idx];
   }
 
   public deleteFacility(id: string): boolean {
-    const before = this.data.facilities.length;
+    const initialLen = this.data.facilities.length;
     this.data.facilities = this.data.facilities.filter(f => f.id !== id);
-    this.saveData();
-    return this.data.facilities.length < before;
+    // Unlink any child facilities
+    this.data.facilities.forEach(f => {
+      if (f.parentId === id) {
+        f.parentId = null;
+        f.parentName = undefined;
+      }
+    });
+    this.save();
+    return this.data.facilities.length < initialLen;
   }
 
-  // Facility Job Roles
-  public addFacilityJobRole(facilityId: string, roleName: string, description?: string): FacilityJobRole | null {
-    const fac = this.data.facilities.find(f => f.id === facilityId);
-    if (!fac) return null;
-    if (!fac.jobRoles) fac.jobRoles = [];
-    const newRole: FacilityJobRole = {
-      id: `jr-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
-      facilityId,
-      roleName: roleName.trim(),
-      description: description?.trim() || '',
-      createdAt: new Date().toISOString()
-    };
-    fac.jobRoles.push(newRole);
-    this.saveData();
-    return newRole;
-  }
-
-  public deleteFacilityJobRole(facilityId: string, roleId: string): boolean {
-    const fac = this.data.facilities.find(f => f.id === facilityId);
-    if (!fac || !fac.jobRoles) return false;
-    const before = fac.jobRoles.length;
-    fac.jobRoles = fac.jobRoles.filter(r => r.id !== roleId);
-    this.saveData();
-    return fac.jobRoles.length < before;
-  }
-
-  // Users & RBAC Management
+  // Users CRUD
   public getUsers(): User[] {
     return this.data.users;
   }
 
   public addUser(user: User): User {
-    // Check if email already exists
-    const existing = this.data.users.find(u => u.email.toLowerCase() === user.email.toLowerCase());
-    if (existing) {
-      throw new Error(`User with email ${user.email} already exists`);
-    }
-    const cleanUser: User = {
-      ...user,
-      canDelete: user.canDelete ?? false,
-      isImmutableRootAdmin: false,
-      isActive: user.isActive ?? true,
-      createdAt: user.createdAt || new Date().toISOString()
-    };
-    this.data.users.push(cleanUser);
-    this.saveData();
-    return cleanUser;
+    this.data.users.push(user);
+    this.save();
+    return user;
   }
 
   public updateUser(id: string, updates: Partial<User>): User | null {
     const idx = this.data.users.findIndex(u => u.id === id);
     if (idx === -1) return null;
-    const existing = this.data.users[idx];
-
-    // ROOT SUPER ADMIN IMMUTABILITY PROTECTION
-    if (existing.isImmutableRootAdmin || existing.email.toLowerCase() === 'superadmincf@leco.com') {
-      // Prevent changing role, email, active status, or delete permissions for root super admin
-      this.data.users[idx] = {
-        ...existing,
-        name: updates.name || existing.name,
-        contactNumber: updates.contactNumber || existing.contactNumber,
-        department: updates.department || existing.department,
-        role: 'super_admin',
-        email: 'superadmincf@leco.com',
-        canDelete: true,
-        isActive: true,
-        isImmutableRootAdmin: true
-      };
-      this.saveData();
-      return this.data.users[idx];
+    
+    // Prevent removing super_admin status from root
+    if (this.data.users[idx].email.toLowerCase() === 'superadmincf@leco.com') {
+      updates.role = 'super_admin';
+      updates.isActive = true;
+      updates.canDelete = true;
     }
 
-    this.data.users[idx] = {
-      ...existing,
-      ...updates,
-      isImmutableRootAdmin: false // Only root user retains this
-    };
-    this.saveData();
+    this.data.users[idx] = { ...this.data.users[idx], ...updates };
+    this.save();
     return this.data.users[idx];
   }
 
-  public deleteUser(id: string): { success: boolean; message?: string } {
-    const user = this.data.users.find(u => u.id === id);
-    if (!user) {
-      return { success: false, message: 'User not found' };
+  public deleteUser(id: string): boolean {
+    const target = this.data.users.find(u => u.id === id);
+    if (target && target.email.toLowerCase() === 'superadmincf@leco.com') {
+      return false; // Immutable root admin
     }
-
-    // ROOT SUPER ADMIN IMMUTABILITY PROTECTION
-    if (user.isImmutableRootAdmin || user.email.toLowerCase() === 'superadmincf@leco.com') {
-      return { 
-        success: false, 
-        message: 'Security Violation: Root Super Admin profile (superadmincf@leco.com) is permanently immutable and cannot be deleted.' 
-      };
-    }
-
+    const initialLen = this.data.users.length;
     this.data.users = this.data.users.filter(u => u.id !== id);
-    this.saveData();
-    return { success: true };
+    this.save();
+    return this.data.users.length < initialLen;
   }
 
-  public toggleUserDeletePermission(id: string, canDelete: boolean): User | null {
-    const user = this.data.users.find(u => u.id === id);
-    if (!user) return null;
-    if (user.isImmutableRootAdmin || user.email.toLowerCase() === 'superadmincf@leco.com') {
-      return user; // Super Admin delete permission is always true
-    }
-    user.canDelete = canDelete;
-    this.saveData();
-    return user;
-  }
-
-  // Emission factors
-  public getEmissionFactors(): EmissionFactorEntry[] {
+  // Emission Factors CRUD
+  public getEmissionFactors(): EmissionFactor[] {
     return this.data.emissionFactors;
   }
 
-  public updateEmissionFactor(id: string, factor: number): EmissionFactorEntry | null {
-    const item = this.data.emissionFactors.find(e => e.id === id);
-    if (!item) return null;
-    item.factorKgCO2e = factor;
-    this.saveData();
-    return item;
+  public addEmissionFactor(factor: EmissionFactor): EmissionFactor {
+    this.data.emissionFactors.push(factor);
+    this.save();
+    return factor;
   }
 
-  // Generic generic scope collections handlers
-  public getCollection<T>(collectionName: keyof DatabaseSchema): T[] {
-    return this.data[collectionName] as unknown as T[];
-  }
-
-  public addToCollection<T extends { id: string }>(collectionName: keyof DatabaseSchema, item: T): T {
-    (this.data[collectionName] as unknown as T[]).push(item);
-    this.saveData();
-    return item;
-  }
-
-  public updateInCollection<T extends { id: string }>(collectionName: keyof DatabaseSchema, id: string, updates: Partial<T>): T | null {
-    const list = this.data[collectionName] as unknown as T[];
-    const idx = list.findIndex(item => item.id === id);
+  public updateEmissionFactor(id: string, updates: Partial<EmissionFactor>): EmissionFactor | null {
+    const idx = this.data.emissionFactors.findIndex(f => f.id === id);
     if (idx === -1) return null;
-    list[idx] = { ...list[idx], ...updates };
-    this.saveData();
-    return list[idx];
+    this.data.emissionFactors[idx] = { ...this.data.emissionFactors[idx], ...updates };
+    this.save();
+    return this.data.emissionFactors[idx];
   }
 
-  public deleteFromCollection<T extends { id: string }>(collectionName: keyof DatabaseSchema, id: string): boolean {
-    const list = this.data[collectionName] as unknown as T[];
-    const before = list.length;
-    (this.data[collectionName] as unknown as T[]) = list.filter(item => item.id !== id);
-    this.saveData();
-    return (this.data[collectionName] as unknown as T[]).length < before;
+  public deleteEmissionFactor(id: string): boolean {
+    const initialLen = this.data.emissionFactors.length;
+    this.data.emissionFactors = this.data.emissionFactors.filter(f => f.id !== id);
+    this.save();
+    return this.data.emissionFactors.length < initialLen;
   }
 
-  // Calculate comprehensive analytics
-  public getAnalyticsSummary(year?: number, facilityId?: string): {
-    totals: ScopeTotals;
-    monthlyTrends: MonthlyEmissionTrend[];
-    facilityStats: FacilityEmissionStat[];
-  } {
-    // Determine matching facility IDs (including child CSCs if this is a parent branch)
+  // Scope 1 CRUD
+  public getScope1(): Scope1Record[] {
+    return this.data.scope1;
+  }
+
+  public addScope1(rec: Scope1Record): Scope1Record {
+    this.data.scope1.push(rec);
+    this.save();
+    return rec;
+  }
+
+  public updateScope1(id: string, updates: Partial<Scope1Record>): Scope1Record | null {
+    const idx = this.data.scope1.findIndex(r => r.id === id);
+    if (idx === -1) return null;
+    this.data.scope1[idx] = { ...this.data.scope1[idx], ...updates };
+    this.save();
+    return this.data.scope1[idx];
+  }
+
+  public deleteScope1(id: string): boolean {
+    const initialLen = this.data.scope1.length;
+    this.data.scope1 = this.data.scope1.filter(r => r.id !== id);
+    this.save();
+    return this.data.scope1.length < initialLen;
+  }
+
+  // Scope 2 CRUD
+  public getScope2(): Scope2Record[] {
+    return this.data.scope2;
+  }
+
+  public addScope2(rec: Scope2Record): Scope2Record {
+    this.data.scope2.push(rec);
+    this.save();
+    return rec;
+  }
+
+  public updateScope2(id: string, updates: Partial<Scope2Record>): Scope2Record | null {
+    const idx = this.data.scope2.findIndex(r => r.id === id);
+    if (idx === -1) return null;
+    this.data.scope2[idx] = { ...this.data.scope2[idx], ...updates };
+    this.save();
+    return this.data.scope2[idx];
+  }
+
+  public deleteScope2(id: string): boolean {
+    const initialLen = this.data.scope2.length;
+    this.data.scope2 = this.data.scope2.filter(r => r.id !== id);
+    this.save();
+    return this.data.scope2.length < initialLen;
+  }
+
+  // Scope 3 CRUD
+  public getScope3(): Scope3Record[] {
+    return this.data.scope3;
+  }
+
+  public addScope3(rec: Scope3Record): Scope3Record {
+    this.data.scope3.push(rec);
+    this.save();
+    return rec;
+  }
+
+  public updateScope3(id: string, updates: Partial<Scope3Record>): Scope3Record | null {
+    const idx = this.data.scope3.findIndex(r => r.id === id);
+    if (idx === -1) return null;
+    this.data.scope3[idx] = { ...this.data.scope3[idx], ...updates };
+    this.save();
+    return this.data.scope3[idx];
+  }
+
+  public deleteScope3(id: string): boolean {
+    const initialLen = this.data.scope3.length;
+    this.data.scope3 = this.data.scope3.filter(r => r.id !== id);
+    this.save();
+    return this.data.scope3.length < initialLen;
+  }
+
+  // Dashboard Aggregator
+  public getDashboardSummary(year?: number, facilityId?: string): DashboardSummary {
     let matchingFacilityIds: string[] = [];
     if (facilityId && facilityId !== 'ALL') {
       matchingFacilityIds = [facilityId];
@@ -1970,161 +1455,68 @@ class DatabaseManager {
       return true;
     };
 
-    // Scope 1
-    const v = this.data.scope1Vehicles.filter(filterFn);
-    const g = this.data.scope1Generators.filter(filterFn);
-    const st = this.data.scope1Stationary.filter(filterFn);
-    const rf = this.data.scope1Refrigerants.filter(filterFn);
-    const sf = this.data.scope1SF6.filter(filterFn);
+    const s1 = this.data.scope1.filter(filterFn);
+    const s2 = this.data.scope2.filter(filterFn);
+    const s3 = this.data.scope3.filter(filterFn);
 
-    const vehT = v.reduce((sum, item) => sum + (item.calculatedTCO2e || 0), 0);
-    const genT = g.reduce((sum, item) => sum + (item.calculatedTCO2e || 0), 0);
-    const statT = st.reduce((sum, item) => sum + (item.calculatedTCO2e || 0), 0);
-    const refT = rf.reduce((sum, item) => sum + (item.calculatedTCO2e || 0), 0);
-    const sf6T = sf.reduce((sum, item) => sum + (item.calculatedTCO2e || 0), 0);
-    const totalScope1 = vehT + genT + statT + refT + sf6T;
+    const scope1Total = s1.reduce((sum, r) => sum + Number(r.totalEmissionsTonsCO2e || 0), 0);
+    const scope2Total = s2.reduce((sum, r) => sum + Number(r.totalEmissionsTonsCO2e || 0), 0);
+    const scope3Total = s3.reduce((sum, r) => sum + Number(r.totalEmissionsTonsCO2e || 0), 0);
+    const solarOffsetTotal = s2.reduce((sum, r) => sum + Number((r.solarOffsetKgCO2e || 0) / 1000), 0);
 
-    // Scope 2
-    const el = this.data.scope2Electricity.filter(filterFn);
-    const sol = this.data.scope2Solar.filter(filterFn);
-
-    const elecT = el.reduce((sum, item) => sum + (item.calculatedTCO2e || 0), 0);
-    const solAvoidedT = sol.reduce((sum, item) => sum + (item.avoidedEmissionsTCO2e || 0), 0);
-    const solGenKWh = sol.reduce((sum, item) => sum + (item.solarGeneratedKWh || 0), 0);
-    const netScope2T = Math.max(0, elecT - solAvoidedT);
-
-    // Scope 3
-    const pg = this.data.scope3PurchasedGoods.filter(filterFn);
-    const cg = this.data.scope3CapitalGoods.filter(filterFn);
-    const cn = this.data.scope3Construction.filter(filterFn);
-    const fr = this.data.scope3UpstreamFreight.filter(filterFn);
-    const ws = this.data.scope3Waste.filter(filterFn);
-    const tr = this.data.scope3BusinessTravel.filter(filterFn);
-    const dl = this.data.scope3DistributionLoss.filter(filterFn);
-
-    const pgT = pg.reduce((sum, item) => sum + (item.calculatedTCO2e || 0), 0);
-    const cgT = cg.reduce((sum, item) => sum + (item.calculatedTCO2e || 0), 0);
-    const cnT = cn.reduce((sum, item) => sum + (item.calculatedTCO2e || 0), 0);
-    const frT = fr.reduce((sum, item) => sum + (item.calculatedTCO2e || 0), 0);
-    const wsT = ws.reduce((sum, item) => sum + (item.calculatedTCO2e || 0), 0);
-    const trT = tr.reduce((sum, item) => sum + (item.calculatedTCO2e || 0), 0);
-    const dlT = dl.reduce((sum, item) => sum + (item.calculatedTCO2e || 0), 0);
-    const totalScope3 = pgT + cgT + cnT + frT + wsT + trT + dlT;
-
-    const grandTotalTCO2e = Number((totalScope1 + elecT + totalScope3).toFixed(3));
-    const netTotalTCO2e = Number((totalScope1 + netScope2T + totalScope3).toFixed(3));
-    const totalRecordsCount = v.length + g.length + st.length + rf.length + sf.length + el.length + sol.length + pg.length + cg.length + cn.length + fr.length + ws.length + tr.length + dl.length;
-
-    const totals: ScopeTotals = {
-      scope1: {
-        totalTCO2e: Number(totalScope1.toFixed(3)),
-        vehiclesTCO2e: Number(vehT.toFixed(3)),
-        generatorsTCO2e: Number(genT.toFixed(3)),
-        stationaryLPGTCO2e: Number(statT.toFixed(3)),
-        refrigerantsTCO2e: Number(refT.toFixed(3)),
-        sf6TCO2e: Number(sf6T.toFixed(3))
-      },
-      scope2: {
-        totalTCO2e: Number(elecT.toFixed(3)),
-        gridElectricityTCO2e: Number(elecT.toFixed(3)),
-        solarGeneratedKWh: Number(solGenKWh.toFixed(1)),
-        solarAvoidedTCO2e: Number(solAvoidedT.toFixed(3)),
-        netScope2TCO2e: Number(netScope2T.toFixed(3))
-      },
-      scope3: {
-        totalTCO2e: Number(totalScope3.toFixed(3)),
-        purchasedGoodsTCO2e: Number(pgT.toFixed(3)),
-        capitalGoodsTCO2e: Number(cgT.toFixed(3)),
-        constructionTCO2e: Number(cnT.toFixed(3)),
-        upstreamFreightTCO2e: Number(frT.toFixed(3)),
-        wasteTCO2e: Number(wsT.toFixed(3)),
-        businessTravelCommutingTCO2e: Number(trT.toFixed(3)),
-        distributionLossTCO2e: Number(dlT.toFixed(3))
-      },
-      grandTotalTCO2e,
-      netTotalTCO2e,
-      totalRecordsCount
-    };
-
-    // Monthly trends
-    const monthNames: ReportingMonth[] = [
-      'January', 'February', 'March', 'April', 'May', 'June',
-      'July', 'August', 'September', 'October', 'November', 'December'
-    ];
-    const monthShorts = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
-    const monthlyTrends: MonthlyEmissionTrend[] = monthNames.map((m, idx) => {
-      const matchMonth = (rec: { month: ReportingMonth }) => rec.month === m;
-      const s1m = v.filter(matchMonth).reduce((s, i) => s + i.calculatedTCO2e, 0)
-        + g.filter(matchMonth).reduce((s, i) => s + i.calculatedTCO2e, 0)
-        + st.filter(matchMonth).reduce((s, i) => s + i.calculatedTCO2e, 0)
-        + rf.filter(matchMonth).reduce((s, i) => s + i.calculatedTCO2e, 0)
-        + sf.filter(matchMonth).reduce((s, i) => s + i.calculatedTCO2e, 0);
-
-      const s2m = el.filter(matchMonth).reduce((s, i) => s + i.calculatedTCO2e, 0);
-      const solAvoidm = sol.filter(matchMonth).reduce((s, i) => s + i.avoidedEmissionsTCO2e, 0);
-
-      const s3m = pg.filter(matchMonth).reduce((s, i) => s + i.calculatedTCO2e, 0)
-        + cg.filter(matchMonth).reduce((s, i) => s + i.calculatedTCO2e, 0)
-        + cn.filter(matchMonth).reduce((s, i) => s + i.calculatedTCO2e, 0)
-        + fr.filter(matchMonth).reduce((s, i) => s + i.calculatedTCO2e, 0)
-        + ws.filter(matchMonth).reduce((s, i) => s + i.calculatedTCO2e, 0)
-        + tr.filter(matchMonth).reduce((s, i) => s + i.calculatedTCO2e, 0)
-        + dl.filter(matchMonth).reduce((s, i) => s + i.calculatedTCO2e, 0);
+    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const monthlyTrends: MonthlyEmissionTrend[] = monthNames.map((name, i) => {
+      const mStr = String(i + 1).padStart(2, '0');
+      const mS1 = s1.filter(r => r.reportingMonth === mStr).reduce((sum, r) => sum + Number(r.totalEmissionsTonsCO2e || 0), 0);
+      const mS2 = s2.filter(r => r.reportingMonth === mStr).reduce((sum, r) => sum + Number(r.totalEmissionsTonsCO2e || 0), 0);
+      const mS3 = s3.filter(r => r.reportingMonth === mStr).reduce((sum, r) => sum + Number(r.totalEmissionsTonsCO2e || 0), 0);
+      const mSolar = s2.filter(r => r.reportingMonth === mStr).reduce((sum, r) => sum + Number((r.solarOffsetKgCO2e || 0) / 1000), 0);
 
       return {
-        month: m,
-        monthShort: monthShorts[idx],
-        scope1: Number(s1m.toFixed(2)),
-        scope2: Number(s2m.toFixed(2)),
-        scope3: Number(s3m.toFixed(2)),
-        total: Number((s1m + s2m + s3m).toFixed(2)),
-        solarAvoided: Number(solAvoidm.toFixed(2))
+        month: mStr,
+        monthName: name,
+        scope1: Number(mS1.toFixed(2)),
+        scope2: Number(mS2.toFixed(2)),
+        scope3: Number(mS3.toFixed(2)),
+        total: Number((mS1 + mS2 + mS3).toFixed(2)),
+        solarOffset: Number(mSolar.toFixed(2))
       };
     });
 
-    // Facility stats
-    const facilityStats: FacilityEmissionStat[] = this.data.facilities.map(fac => {
-      const matchFac = (rec: { facilityId: string; reportingYear: number }) => {
-        if (rec.facilityId !== fac.id) return false;
-        if (year && rec.reportingYear !== Number(year)) return false;
-        return true;
-      };
+    const activeFacilities = facilityId && facilityId !== 'ALL'
+      ? this.data.facilities.filter(f => matchingFacilityIds.includes(f.id))
+      : this.data.facilities;
 
-      const s1 = this.data.scope1Vehicles.filter(matchFac).reduce((s, i) => s + i.calculatedTCO2e, 0)
-        + this.data.scope1Generators.filter(matchFac).reduce((s, i) => s + i.calculatedTCO2e, 0)
-        + this.data.scope1Stationary.filter(matchFac).reduce((s, i) => s + i.calculatedTCO2e, 0)
-        + this.data.scope1Refrigerants.filter(matchFac).reduce((s, i) => s + i.calculatedTCO2e, 0)
-        + this.data.scope1SF6.filter(matchFac).reduce((s, i) => s + i.calculatedTCO2e, 0);
-
-      const s2 = this.data.scope2Electricity.filter(matchFac).reduce((s, i) => s + i.calculatedTCO2e, 0);
-
-      const s3 = this.data.scope3PurchasedGoods.filter(matchFac).reduce((s, i) => s + i.calculatedTCO2e, 0)
-        + this.data.scope3CapitalGoods.filter(matchFac).reduce((s, i) => s + i.calculatedTCO2e, 0)
-        + this.data.scope3Construction.filter(matchFac).reduce((s, i) => s + i.calculatedTCO2e, 0)
-        + this.data.scope3UpstreamFreight.filter(matchFac).reduce((s, i) => s + i.calculatedTCO2e, 0)
-        + this.data.scope3Waste.filter(matchFac).reduce((s, i) => s + i.calculatedTCO2e, 0)
-        + this.data.scope3BusinessTravel.filter(matchFac).reduce((s, i) => s + i.calculatedTCO2e, 0)
-        + this.data.scope3DistributionLoss.filter(matchFac).reduce((s, i) => s + i.calculatedTCO2e, 0);
-
-      const total = Number((s1 + s2 + s3).toFixed(2));
-      const percentage = grandTotalTCO2e > 0 ? Number(((total / grandTotalTCO2e) * 100).toFixed(1)) : 0;
+    const facilityStats: FacilityEmissionStat[] = activeFacilities.map(fac => {
+      const facS1 = s1.filter(r => r.facilityId === fac.id).reduce((sum, r) => sum + Number(r.totalEmissionsTonsCO2e || 0), 0);
+      const facS2 = s2.filter(r => r.facilityId === fac.id).reduce((sum, r) => sum + Number(r.totalEmissionsTonsCO2e || 0), 0);
+      const facS3 = s3.filter(r => r.facilityId === fac.id).reduce((sum, r) => sum + Number(r.totalEmissionsTonsCO2e || 0), 0);
 
       return {
         facilityId: fac.id,
         facilityName: fac.name,
         facilityType: fac.type,
-        location: fac.location,
-        scope1: Number(s1.toFixed(2)),
-        scope2: Number(s2.toFixed(2)),
-        scope3: Number(s3.toFixed(2)),
-        total,
-        percentage
+        parentName: fac.parentName,
+        scope1: Number(facS1.toFixed(2)),
+        scope2: Number(facS2.toFixed(2)),
+        scope3: Number(facS3.toFixed(2)),
+        total: Number((facS1 + facS2 + facS3).toFixed(2))
       };
     });
 
-    return { totals, monthlyTrends, facilityStats };
+    return {
+      reportingYear: Number(year) || 2024,
+      totalEmissionsTonsCO2e: Number((scope1Total + scope2Total + scope3Total).toFixed(2)),
+      scope1TotalTons: Number(scope1Total.toFixed(2)),
+      scope2TotalTons: Number(scope2Total.toFixed(2)),
+      scope3TotalTons: Number(scope3Total.toFixed(2)),
+      solarOffsetTotalTons: Number(solarOffsetTotal.toFixed(2)),
+      facilityCount: activeFacilities.length,
+      recordsCount: s1.length + s2.length + s3.length,
+      monthlyTrends,
+      facilityStats
+    };
   }
 }
 
-export const db = new DatabaseManager();
+export const db = new DatabaseStore();

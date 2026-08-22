@@ -1,567 +1,441 @@
-import React, { useState } from 'react';
-import { 
-  Users, UserPlus, Shield, ShieldCheck, ShieldAlert, Edit2, Trash2, 
-  Lock, CheckCircle2, XCircle, Building2, Briefcase, Mail, Phone,
-  Search, Filter, Check, Eye, EyeOff, Sparkles, AlertCircle, Key
-} from 'lucide-react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { User, UserRole, Facility } from '../types';
+import { User, UserRole, AppModule, Facility } from '../types';
+import { api } from '../services/api';
+import { 
+  Users, 
+  Plus, 
+  Edit3, 
+  Trash2, 
+  ShieldCheck, 
+  Building2, 
+  UserCheck, 
+  Key, 
+  Check, 
+  X, 
+  Search, 
+  Lock, 
+  Mail, 
+  Phone, 
+  CheckCircle2, 
+  AlertCircle,
+  ToggleLeft,
+  ToggleRight,
+  Shield,
+  Layers
+} from 'lucide-react';
+import { isSupabaseConfigured, signUpWithSupabaseAuth } from '../services/supabase';
+
+const ALL_MODULES: { id: AppModule; label: string; desc: string }[] = [
+  { id: 'dashboard', label: 'Executive Dashboard', desc: 'Summary metrics & charts' },
+  { id: 'scope1', label: 'Scope 1 Module', desc: 'Direct fuel combustion & SF6 gas logging' },
+  { id: 'scope2', label: 'Scope 2 Module', desc: 'Grid electricity and Solar PV tracking' },
+  { id: 'scope3', label: 'Scope 3 Module', desc: 'Purchased goods, freight & commuting' },
+  { id: 'reports', label: 'GHG Inventory Reports', desc: 'ISO 14064 reporting & export' },
+  { id: 'calculator', label: 'Quick Estimator', desc: 'Single-source emissions calculator' },
+  { id: 'facilities', label: 'Facilities Management', desc: 'Branch and CSC operational hierarchy' },
+  { id: 'users', label: 'User Roles & RBAC', desc: 'User management & permissions' },
+  { id: 'factors', label: 'Emission Factors', desc: 'GHG coefficients repository' },
+  { id: 'sync', label: 'Supabase Cloud Sync', desc: 'Database connection and schema' }
+];
 
 export const UserManager: React.FC = () => {
   const { 
-    user: currentUser, 
-    users, 
     facilities, 
     isSuperAdmin, 
-    isBranchAdmin, 
-    createUser, 
-    updateUser, 
-    deleteUser, 
-    toggleUserDelete,
-    switchUser,
-    notify 
+    canDelete, 
+    notify, 
+    refreshUsers, 
+    user: currentUser 
   } = useAuth();
 
-  const [showModal, setShowModal] = useState(false);
-  const [editingUser, setEditingUser] = useState<User | null>(null);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [roleFilter, setRoleFilter] = useState('ALL');
-  const [facilityFilter, setFacilityFilter] = useState('ALL');
+  const [usersList, setUsersList] = useState<User[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [roleFilter, setRoleFilter] = useState<string>('ALL');
 
-  // Form State
+  // Modal State
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+
+  // Form Fields
   const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   const [role, setRole] = useState<UserRole>('facility_user');
-  const [facilityId, setFacilityId] = useState<string>('');
+  const [facilityId, setFacilityId] = useState('');
   const [assignedFacilityIds, setAssignedFacilityIds] = useState<string[]>([]);
   const [jobRole, setJobRole] = useState('');
   const [department, setDepartment] = useState('');
   const [contactNumber, setContactNumber] = useState('');
-  const [canDelete, setCanDelete] = useState<boolean>(false);
-  const [allowedModules, setAllowedModules] = useState<string[]>([
+  const [userCanDelete, setUserCanDelete] = useState(false);
+  const [allowedModules, setAllowedModules] = useState<AppModule[]>([
     'dashboard', 'scope1', 'scope2', 'scope3', 'reports', 'calculator'
   ]);
+  const [isActive, setIsActive] = useState(true);
 
-  // All available system modules for granular assignment
-  const AVAILABLE_MODULES = [
-    { key: 'dashboard', label: 'Overview Dashboard' },
-    { key: 'scope1', label: 'Scope 1 Emissions' },
-    { key: 'scope2', label: 'Scope 2 Clean & Grid' },
-    { key: 'scope3', label: 'Scope 3 Supply Chain' },
-    { key: 'reports', label: 'GHG Verification Reports' },
-    { key: 'facilities', label: 'Facilities Directory' },
-    { key: 'users', label: 'User Management (RBAC)' },
-    { key: 'emission-factors', label: 'Emission Factors Config' },
-    { key: 'calculator', label: 'Live Instant Calculator' },
-  ];
+  const fetchUsers = async () => {
+    setLoading(true);
+    try {
+      const data = await api.getUsers();
+      setUsersList(data);
+    } catch (err) {
+      console.error('Error fetching users:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-  // List of facilities the current actor is permitted to assign/manage
-  const manageableFacilities = isSuperAdmin
-    ? facilities
-    : facilities.filter(f => currentUser?.assignedFacilityIds?.includes(f.id));
+  useEffect(() => {
+    fetchUsers();
+  }, []);
 
-  // Determine dynamic job roles available for selected facility in form
-  const selectedFacilityObj = facilities.find(f => f.id === facilityId);
-  const availableJobRoles = selectedFacilityObj?.jobRoles || [];
+  const parentBranches = facilities.filter(f => f.type === 'Branch' || f.isParent);
 
-  const handleOpenAdd = () => {
+  const openAddModal = () => {
     setEditingUser(null);
     setEmail('');
+    setPassword('Sadmin@cf369');
     setName('');
     setRole('facility_user');
-    const firstFacId = manageableFacilities[0]?.id || facilities[0]?.id || 'fac-1';
-    setFacilityId(firstFacId);
-    setAssignedFacilityIds([firstFacId]);
-    const firstFacObj = facilities.find(f => f.id === firstFacId);
-    setJobRole(firstFacObj?.jobRoles?.[0]?.roleName || 'Operations Officer');
-    setDepartment('Operations');
+    setFacilityId(facilities[0]?.id || '');
+    setAssignedFacilityIds(facilities[0]?.id ? [facilities[0].id] : []);
+    setJobRole('Customer Service Officer');
+    setDepartment('Distribution Operations');
     setContactNumber('+94 ');
-    setCanDelete(false);
+    setUserCanDelete(false);
     setAllowedModules(['dashboard', 'scope1', 'scope2', 'scope3', 'reports', 'calculator']);
-    setShowModal(true);
+    setIsActive(true);
+    setIsModalOpen(true);
   };
 
-  const handleOpenEdit = (targetUser: User) => {
-    if (targetUser.isImmutableRootAdmin || targetUser.email.toLowerCase() === 'superadmincf@leco.com') {
-      notify('Root Super Admin (superadmincf@leco.com) is immutable and protected by security policy.', 'info');
-      return;
-    }
-    setEditingUser(targetUser);
-    setEmail(targetUser.email);
-    setName(targetUser.name);
-    setRole(targetUser.role);
-    setFacilityId(targetUser.facilityId || manageableFacilities[0]?.id || '');
-    setAssignedFacilityIds(targetUser.assignedFacilityIds || (targetUser.facilityId ? [targetUser.facilityId] : []));
-    setJobRole(targetUser.jobRole || '');
-    setDepartment(targetUser.department || '');
-    setContactNumber(targetUser.contactNumber || '');
-    setCanDelete(Boolean(targetUser.canDelete));
-    setAllowedModules(targetUser.allowedModules || ['dashboard', 'scope1', 'scope2', 'scope3', 'reports', 'calculator']);
-    setShowModal(true);
+  const openEditModal = (u: User) => {
+    setEditingUser(u);
+    setEmail(u.email);
+    setPassword('');
+    setName(u.name);
+    setRole(u.role);
+    setFacilityId(u.facilityId || '');
+    setAssignedFacilityIds(u.assignedFacilityIds || (u.facilityId ? [u.facilityId] : []));
+    setJobRole(u.jobRole || '');
+    setDepartment(u.department || '');
+    setContactNumber(u.contactNumber || '');
+    setUserCanDelete(u.canDelete ?? false);
+    setAllowedModules(u.allowedModules || ['dashboard', 'scope1', 'scope2', 'scope3', 'reports', 'calculator']);
+    setIsActive(u.isActive);
+    setIsModalOpen(true);
   };
 
-  const handleFacilityChange = (newFacId: string) => {
-    setFacilityId(newFacId);
-    const facObj = facilities.find(f => f.id === newFacId);
-    if (facObj?.jobRoles && facObj.jobRoles.length > 0) {
-      setJobRole(facObj.jobRoles[0].roleName);
+  const toggleModule = (mod: AppModule) => {
+    if (allowedModules.includes(mod)) {
+      setAllowedModules(allowedModules.filter(m => m !== mod));
     } else {
-      setJobRole('');
+      setAllowedModules([...allowedModules, mod]);
     }
   };
 
-  const handleToggleModule = (modKey: string) => {
-    if (allowedModules.includes(modKey)) {
-      setAllowedModules(allowedModules.filter(m => m !== modKey));
-    } else {
-      setAllowedModules([...allowedModules, modKey]);
-    }
-  };
-
-  const handleToggleAssignedFacility = (facId: string) => {
+  const toggleAssignedFacility = (facId: string) => {
     if (assignedFacilityIds.includes(facId)) {
-      if (assignedFacilityIds.length === 1) {
-        notify('Branch Admin must have at least one assigned facility', 'error');
-        return;
-      }
       setAssignedFacilityIds(assignedFacilityIds.filter(id => id !== facId));
     } else {
       setAssignedFacilityIds([...assignedFacilityIds, facId]);
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSaveUser = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email.trim() || !name.trim()) {
       notify('Email and full name are required', 'error');
       return;
     }
 
+    const selectedFacObj = facilities.find(f => f.id === facilityId);
+
+    const payload: Partial<User> = {
+      email: email.trim().toLowerCase(),
+      name: name.trim(),
+      role,
+      facilityId: role === 'super_admin' ? undefined : facilityId || undefined,
+      facilityName: role === 'super_admin' ? undefined : selectedFacObj?.name,
+      assignedFacilityIds: role === 'branch_admin' ? assignedFacilityIds : (facilityId ? [facilityId] : []),
+      jobRole: jobRole.trim(),
+      department: department.trim(),
+      contactNumber: contactNumber.trim(),
+      canDelete: role === 'super_admin' ? true : userCanDelete,
+      allowedModules: role === 'super_admin' 
+        ? ['dashboard', 'scope1', 'scope2', 'scope3', 'reports', 'facilities', 'users', 'factors', 'calculator', 'sync']
+        : allowedModules,
+      isActive
+    };
+
     try {
-      const selectedFac = facilities.find(f => f.id === facilityId);
-
-      const payload: Partial<User> = {
-        email: email.trim().toLowerCase(),
-        name: name.trim(),
-        role,
-        facilityId: role === 'facility_user' ? facilityId : undefined,
-        facilityName: role === 'facility_user' ? selectedFac?.name : undefined,
-        assignedFacilityIds: role === 'branch_admin' ? assignedFacilityIds : undefined,
-        jobRole: role === 'facility_user' ? jobRole : undefined,
-        department: department.trim() || undefined,
-        contactNumber: contactNumber.trim() || undefined,
-        canDelete: role === 'super_admin' ? true : Boolean(canDelete),
-        allowedModules: role === 'super_admin' 
-          ? AVAILABLE_MODULES.map(m => m.key) 
-          : allowedModules
-      };
-
       if (editingUser) {
-        await updateUser(editingUser.id, payload);
+        await api.updateUser(editingUser.id, payload);
+        notify(`User profile for "${payload.name}" updated successfully!`, 'success');
       } else {
-        await createUser(payload);
+        // If Supabase is configured, also register Supabase Auth credentials
+        if (isSupabaseConfigured) {
+          try {
+            await signUpWithSupabaseAuth(email.trim(), password || 'Sadmin@cf369', {
+              name: name.trim(),
+              role,
+              facilityId
+            });
+          } catch (sbErr: any) {
+            console.warn('Supabase Auth user creation note:', sbErr?.message || sbErr);
+          }
+        }
+
+        await api.createUser({
+          ...payload,
+          id: `usr-${Date.now().toString(36)}`
+        });
+        notify(`Officer user account "${payload.name}" created successfully!`, 'success');
       }
-      setShowModal(false);
-    } catch (err) {
-      // Notification handled in context
+      setIsModalOpen(false);
+      await fetchUsers();
+      await refreshUsers();
+    } catch (err: any) {
+      notify(err.message || 'Failed to save user account', 'error');
     }
   };
 
-  const handleDeleteUser = async (targetUser: User) => {
-    if (targetUser.isImmutableRootAdmin || targetUser.email.toLowerCase() === 'superadmincf@leco.com') {
-      notify('Security Exception: Root Super Admin profile is immutable and cannot be deleted.', 'error');
+  const handleDeleteUser = async (id: string) => {
+    if (!canDelete) {
+      notify('You do not have administrative permission to delete users.', 'error');
       return;
     }
-
-    if (window.confirm(`Are you sure you want to permanently remove user account "${targetUser.name}" (${targetUser.email})?`)) {
-      await deleteUser(targetUser.id);
+    try {
+      await api.deleteUser(id);
+      notify('User account deactivated and removed.', 'success');
+      setDeleteConfirmId(null);
+      await fetchUsers();
+      await refreshUsers();
+    } catch (err: any) {
+      notify(err.message || 'Failed to delete user', 'error');
     }
   };
 
-  const handleToggleDelete = async (targetUser: User) => {
-    if (targetUser.isImmutableRootAdmin || targetUser.email.toLowerCase() === 'superadmincf@leco.com') {
-      notify('Super Admin has permanent full delete privileges.', 'info');
-      return;
-    }
-    await toggleUserDelete(targetUser.id, !targetUser.canDelete);
-  };
-
-  // Filtered users list
-  const filteredUsers = users.filter(u => {
-    const matchesSearch = 
-      u.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      u.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      u.department?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      u.jobRole?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      u.facilityName?.toLowerCase().includes(searchQuery.toLowerCase());
-    
+  const filteredUsers = usersList.filter(u => {
+    const matchesSearch = u.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                          u.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                          (u.facilityName && u.facilityName.toLowerCase().includes(searchTerm.toLowerCase()));
     const matchesRole = roleFilter === 'ALL' || u.role === roleFilter;
-
-    const matchesFacility = 
-      facilityFilter === 'ALL' || 
-      u.facilityId === facilityFilter || 
-      (u.assignedFacilityIds && u.assignedFacilityIds.includes(facilityFilter));
-
-    return matchesSearch && matchesRole && matchesFacility;
+    return matchesSearch && matchesRole;
   });
 
   return (
     <div className="space-y-6 pb-12">
-      {/* Top Header */}
-      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+      
+      {/* Header */}
+      <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center space-x-2">
-            <span className="p-2 bg-blue-50 text-blue-600 rounded-xl border border-blue-100">
-              <Users className="w-5 h-5" />
-            </span>
-            <div>
-              <h1 className="text-lg font-bold text-slate-900 flex items-center space-x-2">
-                <span>LECO Access Control & User Management</span>
-                <span className="px-2 py-0.5 bg-blue-100 text-blue-800 text-[10px] font-bold rounded-md uppercase">
-                  RBAC Level 2
-                </span>
-              </h1>
-              <p className="text-xs text-slate-500">
-                Provision branch users, define module access boundaries, and manage granular delete capabilities
-              </p>
-            </div>
+          <div className="flex items-center gap-2 text-xs font-bold text-emerald-700 uppercase tracking-wider">
+            <Users className="w-4 h-4" />
+            <span>Role-Based Access Control (RBAC) & Officer Management</span>
           </div>
+          <h1 className="text-2xl font-black text-slate-900 mt-1">
+            LECO User Accounts & Delete Permissions
+          </h1>
+          <p className="text-xs text-slate-500 mt-0.5">
+            Configure officer accounts, multi-facility branch permissions, module access rights, and granular record deletion capability.
+          </p>
         </div>
 
-        {(isSuperAdmin || isBranchAdmin) && (
+        {isSuperAdmin && (
           <button
-            onClick={handleOpenAdd}
-            id="btn-add-user"
-            className="inline-flex items-center space-x-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs rounded-xl transition shadow-sm cursor-pointer"
+            onClick={openAddModal}
+            className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl shadow-sm transition flex items-center gap-2 shrink-0 cursor-pointer"
           >
-            <UserPlus className="w-4 h-4" />
+            <Plus className="w-4 h-4" />
             <span>Create New User</span>
           </button>
         )}
       </div>
 
-      {/* Role Impersonation / Fast Testing Bar */}
-      <div className="bg-slate-900 text-white p-4 rounded-2xl border border-slate-800 shadow-md">
-        <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-3">
-          <div className="flex items-center space-x-2">
-            <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
-            <div>
-              <div className="text-xs font-bold text-white flex items-center space-x-2">
-                <span>Live Session Preview & Role Switcher</span>
-                <span className="text-[10px] text-slate-400">(Simulate granular permissions instantly)</span>
-              </div>
-              <div className="text-[11px] text-slate-300">
-                Active User: <span className="font-bold text-emerald-400">{currentUser?.name}</span> ({currentUser?.role})
-                {currentUser?.canDelete ? (
-                  <span className="ml-2 px-1.5 py-0.5 bg-emerald-950 text-emerald-300 border border-emerald-800 rounded text-[10px] font-mono">Delete: ON</span>
-                ) : (
-                  <span className="ml-2 px-1.5 py-0.5 bg-rose-950 text-rose-300 border border-rose-800 rounded text-[10px] font-mono">Delete: OFF</span>
-                )}
-              </div>
-            </div>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-[11px] text-slate-400 mr-1">Switch session to:</span>
-            {users.map(u => (
-              <button
-                key={u.id}
-                onClick={() => switchUser(u)}
-                className={`px-2.5 py-1 rounded-lg text-xs font-medium transition flex items-center space-x-1 ${
-                  currentUser?.id === u.id
-                    ? 'bg-emerald-600 text-white shadow-sm ring-2 ring-emerald-400'
-                    : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700'
-                }`}
-              >
-                <span>{u.name.split(' ')[0]}</span>
-                <span className="text-[10px] opacity-75">
-                  ({u.role === 'super_admin' ? 'SuperAdmin' : u.role === 'branch_admin' ? 'BranchAdmin' : u.canDelete ? 'User:Del✓' : 'User:Del✗'})
-                </span>
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* Summary KPI Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
-        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-          <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Total Active Accounts</div>
-          <div className="text-2xl font-bold text-slate-900 mt-1">{users.length}</div>
-          <div className="text-[11px] text-slate-400 mt-0.5">LECO personnel</div>
-        </div>
-
-        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-          <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Super Admins</div>
-          <div className="text-2xl font-bold text-blue-600 mt-1">
-            {users.filter(u => u.role === 'super_admin').length}
-          </div>
-          <div className="text-[11px] text-emerald-600 mt-0.5 font-medium flex items-center space-x-1">
-            <ShieldCheck className="w-3 h-3" />
-            <span>Root account protected</span>
-          </div>
-        </div>
-
-        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-          <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Branch Admins</div>
-          <div className="text-2xl font-bold text-indigo-600 mt-1">
-            {users.filter(u => u.role === 'branch_admin').length}
-          </div>
-          <div className="text-[11px] text-slate-400 mt-0.5">Multi-facility scope</div>
-        </div>
-
-        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-          <div className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Facility Users</div>
-          <div className="text-2xl font-bold text-slate-700 mt-1">
-            {users.filter(u => u.role === 'facility_user' || u.role === 'facility_officer').length}
-          </div>
-          <div className="text-[11px] text-slate-400 mt-0.5">Branch specific entry</div>
-        </div>
-      </div>
-
-      {/* Filter & Search Toolbar */}
-      <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm">
+      {/* Filter and Search Bar */}
+      <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-3">
         <div className="relative w-full sm:w-80">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+          <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
           <input
             type="text"
-            placeholder="Search by name, email, role, job title..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-9 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:ring-2 focus:ring-blue-500 focus:outline-none"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            placeholder="Search by officer name, email, facility..."
+            className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500"
           />
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
-          <div className="flex items-center space-x-1.5">
-            <Filter className="w-3.5 h-3.5 text-slate-400" />
-            <span className="text-xs text-slate-500 font-medium">Role:</span>
-            <select
-              value={roleFilter}
-              onChange={(e) => setRoleFilter(e.target.value)}
-              className="px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-700 focus:outline-none"
+        <div className="flex items-center gap-2">
+          {['ALL', 'super_admin', 'branch_admin', 'facility_user'].map(r => (
+            <button
+              key={r}
+              onClick={() => setRoleFilter(r)}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition cursor-pointer ${
+                roleFilter === r
+                  ? 'bg-slate-900 text-white'
+                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+              }`}
             >
-              <option value="ALL">All Roles</option>
-              <option value="super_admin">Super Admin</option>
-              <option value="branch_admin">Branch Admin</option>
-              <option value="facility_user">Facility User</option>
-            </select>
-          </div>
-
-          <div className="flex items-center space-x-1.5">
-            <span className="text-xs text-slate-500 font-medium">Facility:</span>
-            <select
-              value={facilityFilter}
-              onChange={(e) => setFacilityFilter(e.target.value)}
-              className="px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium text-slate-700 focus:outline-none max-w-[160px] truncate"
-            >
-              <option value="ALL">All Facilities</option>
-              {facilities.map(f => (
-                <option key={f.id} value={f.id}>{f.name}</option>
-              ))}
-            </select>
-          </div>
+              {r === 'ALL' ? 'All Roles' : r === 'super_admin' ? 'Super Admins' : r === 'branch_admin' ? 'Branch Admins' : 'Facility Users'}
+            </button>
+          ))}
         </div>
       </div>
 
       {/* Users Table */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+      <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs text-slate-700">
-            <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200 uppercase tracking-wider text-[10px]">
-              <tr>
-                <th className="py-3 px-4">User Details</th>
-                <th className="py-3 px-4">Role & Scope</th>
-                <th className="py-3 px-4">Facility / Assigned Branches</th>
-                <th className="py-3 px-4">Job Role & Title</th>
-                <th className="py-3 px-4 text-center">Delete Privilege</th>
-                <th className="py-3 px-4 text-right">Actions</th>
+          <table className="w-full text-left text-xs">
+            <thead>
+              <tr className="bg-slate-50 text-slate-500 font-bold border-b border-slate-200">
+                <th className="py-3.5 px-4">Officer / User Name</th>
+                <th className="py-3.5 px-4">Role & Scope</th>
+                <th className="py-3.5 px-4">Assigned Facility / Branch</th>
+                <th className="py-3.5 px-4">Delete Rights</th>
+                <th className="py-3.5 px-4">Allowed Modules</th>
+                <th className="py-3.5 px-4">Status</th>
+                <th className="py-3.5 px-4 text-right">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody className="divide-y divide-slate-100 text-slate-700">
               {filteredUsers.map((u) => {
-                const isRootAdmin = u.isImmutableRootAdmin || u.email.toLowerCase() === 'superadmincf@leco.com';
+                const isRootSuper = u.email.toLowerCase() === 'superadmincf@leco.com';
 
                 return (
-                  <tr key={u.id} className="hover:bg-slate-50/70 transition">
-                    {/* User Details */}
+                  <tr key={u.id} className="hover:bg-slate-50/80 transition">
+                    
+                    {/* User Info */}
                     <td className="py-3.5 px-4">
-                      <div className="flex items-center space-x-3">
-                        <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs ${
-                          isRootAdmin 
-                            ? 'bg-amber-100 text-amber-800 border border-amber-300' 
-                            : u.role === 'branch_admin' 
-                            ? 'bg-indigo-100 text-indigo-800' 
-                            : 'bg-slate-100 text-slate-700'
-                        }`}>
-                          {u.name.charAt(0)}
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-xl bg-slate-800 text-white flex items-center justify-center font-bold text-xs shrink-0">
+                          {u.name.charAt(0).toUpperCase()}
                         </div>
                         <div>
-                          <div className="font-bold text-slate-900 flex items-center space-x-1.5">
+                          <div className="font-bold text-slate-900 flex items-center gap-1.5">
                             <span>{u.name}</span>
-                            {isRootAdmin && (
-                              <span 
-                                title="Root Super Admin: Immutable & Permanently Protected"
-                                className="px-1.5 py-0.2 bg-amber-50 text-amber-800 border border-amber-200 rounded text-[9px] font-bold tracking-tight inline-flex items-center space-x-0.5"
-                              >
-                                <Lock className="w-2.5 h-2.5" />
-                                <span>IMMUTABLE ROOT</span>
+                            {isRootSuper && (
+                              <span className="text-[10px] bg-emerald-100 text-emerald-800 px-1.5 py-0.2 rounded font-bold">
+                                Root
                               </span>
                             )}
                           </div>
-                          <div className="text-[11px] text-slate-500 font-mono flex items-center space-x-1 mt-0.5">
-                            <Mail className="w-3 h-3 text-slate-400" />
+                          <div className="text-[11px] text-slate-400 font-mono flex items-center gap-1">
+                            <Mail className="w-3 h-3 text-slate-400 inline" />
                             <span>{u.email}</span>
                           </div>
-                          {u.department && (
-                            <div className="text-[10px] text-slate-400 mt-0.5">
-                              Dept: {u.department}
+                        </div>
+                      </div>
+                    </td>
+
+                    {/* Role */}
+                    <td className="py-3.5 px-4">
+                      <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold ${
+                        u.role === 'super_admin' ? 'bg-emerald-100 text-emerald-800' :
+                        u.role === 'branch_admin' ? 'bg-blue-100 text-blue-800' :
+                        'bg-amber-100 text-amber-800'
+                      }`}>
+                        {u.role === 'super_admin' && <ShieldCheck className="w-3.5 h-3.5" />}
+                        {u.role === 'branch_admin' && <Building2 className="w-3.5 h-3.5" />}
+                        {u.role === 'facility_user' && <UserCheck className="w-3.5 h-3.5" />}
+                        {u.role === 'super_admin' ? 'Super Admin' : u.role === 'branch_admin' ? 'Branch Admin' : 'Facility User'}
+                      </span>
+                      {u.jobRole && (
+                        <div className="text-[10px] text-slate-500 mt-1 font-medium">
+                          {u.jobRole}
+                        </div>
+                      )}
+                    </td>
+
+                    {/* Facility */}
+                    <td className="py-3.5 px-4">
+                      {u.role === 'super_admin' ? (
+                        <span className="text-emerald-700 font-bold flex items-center gap-1">
+                          <Layers className="w-3 h-3" />
+                          Global LECO Scope (All Facilities)
+                        </span>
+                      ) : (
+                        <div>
+                          <div className="font-semibold text-slate-800 flex items-center gap-1">
+                            <Building2 className="w-3 h-3 text-slate-400" />
+                            <span>{u.facilityName || 'Assigned Branch'}</span>
+                          </div>
+                          {u.assignedFacilityIds && u.assignedFacilityIds.length > 1 && (
+                            <div className="text-[10px] text-blue-600 font-medium">
+                              +{u.assignedFacilityIds.length - 1} subordinate CSCs
                             </div>
                           )}
                         </div>
-                      </div>
+                      )}
                     </td>
 
-                    {/* Role & Scope */}
+                    {/* Granular Delete Rights */}
                     <td className="py-3.5 px-4">
-                      <div>
-                        {u.role === 'super_admin' ? (
-                          <span className="px-2.5 py-1 rounded-md bg-blue-50 text-blue-700 border border-blue-200 font-semibold text-[11px] inline-flex items-center space-x-1">
-                            <Shield className="w-3 h-3" />
-                            <span>Super Admin</span>
+                      {u.canDelete || u.role === 'super_admin' ? (
+                        <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                          <Check className="w-3 h-3 text-emerald-600" />
+                          Delete Enabled
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-md">
+                          <Lock className="w-3 h-3 text-slate-400" />
+                          Read/Edit Only
+                        </span>
+                      )}
+                    </td>
+
+                    {/* Allowed Modules */}
+                    <td className="py-3.5 px-4">
+                      <div className="flex flex-wrap gap-1 max-w-xs">
+                        {(u.allowedModules || []).slice(0, 3).map(m => (
+                          <span key={m} className="text-[9px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-mono">
+                            {m}
                           </span>
-                        ) : u.role === 'branch_admin' ? (
-                          <span className="px-2.5 py-1 rounded-md bg-indigo-50 text-indigo-700 border border-indigo-200 font-semibold text-[11px] inline-flex items-center space-x-1">
-                            <ShieldCheck className="w-3 h-3" />
-                            <span>Branch Admin</span>
-                          </span>
-                        ) : (
-                          <span className="px-2.5 py-1 rounded-md bg-slate-100 text-slate-700 border border-slate-200 font-semibold text-[11px] inline-flex items-center space-x-1">
-                            <Users className="w-3 h-3" />
-                            <span>Facility User</span>
+                        ))}
+                        {(u.allowedModules || []).length > 3 && (
+                          <span className="text-[9px] text-slate-400 font-medium">
+                            +{(u.allowedModules || []).length - 3}
                           </span>
                         )}
-
-                        <div className="text-[10px] text-slate-400 mt-1">
-                          {u.role === 'super_admin' ? 'All 8 facilities' : u.role === 'branch_admin' ? `${u.assignedFacilityIds?.length || 0} branches` : '1 branch locked'}
-                        </div>
                       </div>
                     </td>
 
-                    {/* Facility / Assigned branches */}
+                    {/* Status */}
                     <td className="py-3.5 px-4">
-                      {u.role === 'super_admin' ? (
-                        <div className="font-semibold text-blue-700 flex items-center space-x-1">
-                          <Building2 className="w-3.5 h-3.5 text-blue-500" />
-                          <span>All LECO Network (Global)</span>
-                        </div>
-                      ) : u.role === 'branch_admin' ? (
-                        <div className="space-y-1">
-                          <div className="font-semibold text-slate-800 text-[11px]">
-                            {u.assignedFacilityIds?.length} Branches Assigned:
-                          </div>
-                          <div className="flex flex-wrap gap-1">
-                            {u.assignedFacilityIds?.map(fid => {
-                              const fac = facilities.find(f => f.id === fid);
-                              return (
-                                <span key={fid} className="px-1.5 py-0.5 bg-slate-100 text-slate-700 rounded text-[10px]">
-                                  {fac?.name || fid}
-                                </span>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="font-semibold text-slate-800 flex items-center space-x-1">
-                          <Building2 className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                          <span>{u.facilityName || facilities.find(f => f.id === u.facilityId)?.name || 'Not assigned'}</span>
-                        </div>
-                      )}
-                    </td>
-
-                    {/* Job Role & Title */}
-                    <td className="py-3.5 px-4">
-                      {u.jobRole ? (
-                        <div className="inline-flex items-center space-x-1 px-2.5 py-1 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-md font-medium text-[11px]">
-                          <Briefcase className="w-3 h-3 text-emerald-600" />
-                          <span>{u.jobRole}</span>
-                        </div>
-                      ) : (
-                        <span className="text-slate-400 italic">Default Role</span>
-                      )}
-                    </td>
-
-                    {/* Delete Privilege Toggle */}
-                    <td className="py-3.5 px-4 text-center">
-                      {isRootAdmin ? (
-                        <span 
-                          title="Super Admin has immutable delete capability"
-                          className="px-2.5 py-1 bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-full font-bold text-[10px] inline-flex items-center space-x-1"
-                        >
-                          <CheckCircle2 className="w-3 h-3" />
-                          <span>Permanent</span>
-                        </span>
-                      ) : isSuperAdmin ? (
-                        <button
-                          onClick={() => handleToggleDelete(u)}
-                          className={`px-3 py-1 rounded-full font-bold text-[10px] transition inline-flex items-center space-x-1 cursor-pointer ${
-                            u.canDelete
-                              ? 'bg-emerald-50 text-emerald-700 border border-emerald-300 hover:bg-emerald-100'
-                              : 'bg-rose-50 text-rose-600 border border-rose-200 hover:bg-rose-100'
-                          }`}
-                        >
-                          {u.canDelete ? (
-                            <>
-                              <Check className="w-3 h-3 text-emerald-600" />
-                              <span>Enabled</span>
-                            </>
-                          ) : (
-                            <>
-                              <XCircle className="w-3 h-3 text-rose-500" />
-                              <span>Disabled</span>
-                            </>
-                          )}
-                        </button>
-                      ) : (
-                        <span className={`px-2.5 py-1 rounded-full text-[10px] font-semibold ${
-                          u.canDelete ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'
-                        }`}>
-                          {u.canDelete ? 'Enabled' : 'Disabled'}
-                        </span>
-                      )}
+                      <span className={`inline-block w-2 h-2 rounded-full mr-1.5 ${
+                        u.isActive ? 'bg-emerald-500' : 'bg-slate-300'
+                      }`} />
+                      <span className="font-semibold text-slate-700">
+                        {u.isActive ? 'Active' : 'Deactivated'}
+                      </span>
                     </td>
 
                     {/* Actions */}
                     <td className="py-3.5 px-4 text-right">
-                      <div className="flex items-center justify-end space-x-1">
-                        {isRootAdmin ? (
-                          <span 
-                            title="Root Super Admin profile cannot be edited or deleted" 
-                            className="text-[10px] text-slate-400 font-mono px-2 py-1 bg-slate-100 rounded-md border border-slate-200 flex items-center space-x-1"
+                      <div className="flex items-center justify-end gap-1.5">
+                        {isSuperAdmin && (
+                          <button
+                            onClick={() => openEditModal(u)}
+                            className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition cursor-pointer"
+                            title="Edit User Permissions"
                           >
-                            <Lock className="w-3 h-3 text-slate-400" />
-                            <span>Protected</span>
-                          </span>
-                        ) : (
-                          <>
-                            <button
-                              onClick={() => handleOpenEdit(u)}
-                              title="Edit User"
-                              className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition"
-                            >
-                              <Edit2 className="w-3.5 h-3.5" />
-                            </button>
-                            <button
-                              onClick={() => handleDeleteUser(u)}
-                              title="Delete User"
-                              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </>
+                            <Edit3 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+
+                        {canDelete && isSuperAdmin && !isRootSuper && (
+                          <button
+                            onClick={() => setDeleteConfirmId(u.id)}
+                            className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition cursor-pointer"
+                            title="Deactivate / Delete User"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
                         )}
                       </div>
                     </td>
+
                   </tr>
                 );
               })}
@@ -570,285 +444,303 @@ export const UserManager: React.FC = () => {
         </div>
       </div>
 
-      {/* Modal: Create / Edit User */}
-      {showModal && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-50 p-4 overflow-y-auto">
-          <div className="bg-white rounded-2xl max-w-xl w-full p-6 shadow-2xl border border-slate-200 my-8">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-              <div className="flex items-center space-x-2">
-                <ShieldCheck className="w-5 h-5 text-blue-600" />
-                <h2 className="text-base font-bold text-slate-900">
-                  {editingUser ? `Edit Account: ${editingUser.name}` : 'Provision New LECO Account'}
-                </h2>
+      {/* Delete User Modal */}
+      {deleteConfirmId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 text-center">
+            <div className="w-12 h-12 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center mx-auto mb-3">
+              <Trash2 className="w-6 h-6" />
+            </div>
+            <h3 className="text-base font-bold text-slate-900">Deactivate User Account</h3>
+            <p className="text-xs text-slate-500 mt-2">
+              Are you sure you want to revoke this user's system access? Their historical logs will remain attributed in the audit trail.
+            </p>
+            <div className="mt-5 flex items-center justify-center gap-3">
+              <button
+                onClick={() => setDeleteConfirmId(null)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-xl transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => handleDeleteUser(deleteConfirmId)}
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold rounded-xl shadow transition cursor-pointer"
+              >
+                Confirm Deactivate
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Create / Edit User Modal with Fixed Header/Footer and Scrollable Body */}
+      {isModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl w-full max-w-2xl shadow-2xl border border-slate-200 flex flex-col max-h-[90vh] overflow-hidden">
+            
+            {/* Modal Header (Permanently Visible) */}
+            <div className="px-6 py-4 bg-slate-900 text-white flex items-center justify-between shrink-0 border-b border-slate-800">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center">
+                  <Users className="w-4 h-4" />
+                </div>
+                <div>
+                  <h2 className="text-sm font-bold text-white">
+                    {editingUser ? `Edit Officer: ${editingUser.name}` : 'Provision New LECO Officer Account'}
+                  </h2>
+                  <p className="text-[11px] text-slate-400">
+                    Assign facility boundaries, role scopes, and granular deletion authority
+                  </p>
+                </div>
               </div>
               <button
-                onClick={() => setShowModal(false)}
-                className="p-1 text-slate-400 hover:text-slate-700 rounded-lg"
+                onClick={() => setIsModalOpen(false)}
+                className="p-1.5 text-slate-400 hover:text-white rounded-lg transition cursor-pointer"
               >
-                <XCircle className="w-5 h-5" />
+                <X className="w-4 h-4" />
               </button>
             </div>
 
-            <form onSubmit={handleSubmit} className="space-y-4 mt-4 text-xs">
-              {/* Account Credentials */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {/* Modal Body (Scrollable Only) */}
+            <form id="user-form" onSubmit={handleSaveUser} className="p-6 overflow-y-auto space-y-4 text-xs">
+              
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-slate-700 font-semibold mb-1">Full Name *</label>
-                  <input
-                    type="text"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    required
-                    placeholder="e.g. Eng. Priyantha Dissanayake"
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-700 font-semibold mb-1">Official LECO Email *</label>
+                  <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">
+                    Corporate Email Address *
+                  </label>
                   <input
                     type="email"
+                    required
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
+                    placeholder="officer.name@leco.com"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl font-mono text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">
+                    Full Officer Name *
+                  </label>
+                  <input
+                    type="text"
                     required
-                    disabled={!!editingUser}
-                    placeholder="e.g. priyantha.d@leco.com"
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-blue-500 focus:outline-none disabled:bg-slate-100"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="e.g. Eng. Dilani Senanayake"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   />
                 </div>
               </div>
 
-              {/* Role Selection */}
-              <div>
-                <label className="block text-slate-700 font-semibold mb-1">Account Role Category *</label>
-                <div className="grid grid-cols-3 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setRole('facility_user')}
-                    className={`p-3 rounded-xl border text-left transition flex flex-col justify-between ${
-                      role === 'facility_user'
-                        ? 'border-blue-600 bg-blue-50/50 text-blue-900'
-                        : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100'
-                    }`}
-                  >
-                    <div className="font-bold text-xs">Facility User</div>
-                    <div className="text-[10px] text-slate-500 mt-1">Single branch bound</div>
-                  </button>
+              {!editingUser && (
+                <div>
+                  <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">
+                    Initial Access Password
+                  </label>
+                  <input
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="Default: Sadmin@cf369"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+              )}
 
-                  <button
-                    type="button"
-                    onClick={() => setRole('branch_admin')}
-                    className={`p-3 rounded-xl border text-left transition flex flex-col justify-between ${
-                      role === 'branch_admin'
-                        ? 'border-indigo-600 bg-indigo-50/50 text-indigo-900'
-                        : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100'
-                    }`}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">
+                    User RBAC Role *
+                  </label>
+                  <select
+                    value={role}
+                    onChange={(e) => setRole(e.target.value as UserRole)}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-800 font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   >
-                    <div className="font-bold text-xs">Branch Admin</div>
-                    <div className="text-[10px] text-slate-500 mt-1">Multi-branch scope</div>
-                  </button>
+                    <option value="facility_user">Facility User (Scoped to Specific CSC/Depot)</option>
+                    <option value="branch_admin">Branch Admin (Oversees Regional Branch & CSCs)</option>
+                    <option value="super_admin">Corporate Super Admin (Global LECO Access)</option>
+                  </select>
+                </div>
 
-                  {isSuperAdmin && (
-                    <button
-                      type="button"
-                      onClick={() => setRole('super_admin')}
-                      className={`p-3 rounded-xl border text-left transition flex flex-col justify-between ${
-                        role === 'super_admin'
-                          ? 'border-emerald-600 bg-emerald-50/50 text-emerald-900'
-                          : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100'
-                      }`}
-                    >
-                      <div className="font-bold text-xs">Super Admin</div>
-                      <div className="text-[10px] text-slate-500 mt-1">Full system access</div>
-                    </button>
-                  )}
+                <div>
+                  <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">
+                    Primary Facility / CSC Assignment
+                  </label>
+                  <select
+                    value={facilityId}
+                    onChange={(e) => setFacilityId(e.target.value)}
+                    disabled={role === 'super_admin'}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:opacity-50"
+                  >
+                    {parentBranches.map(branch => {
+                      const children = facilities.filter(f => f.parentId === branch.id);
+                      return (
+                        <optgroup key={branch.id} label={`📍 ${branch.name}`} className="font-bold">
+                          <option value={branch.id}>
+                            {branch.name} (Parent Branch)
+                          </option>
+                          {children.map(child => (
+                            <option key={child.id} value={child.id}>
+                              &nbsp;&nbsp;&bull; {child.name} (CSC)
+                            </option>
+                          ))}
+                        </optgroup>
+                      );
+                    })}
+                    <optgroup label="🏭 Special Depots & Centers">
+                      {facilities.filter(f => !f.parentId && f.type !== 'Branch').map(fac => (
+                        <option key={fac.id} value={fac.id}>
+                          {fac.name} ({fac.type})
+                        </option>
+                      ))}
+                    </optgroup>
+                  </select>
                 </div>
               </div>
 
-              {/* Facility-Level Scope Assignment */}
-              {role === 'facility_user' && (
-                <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 space-y-3">
-                  <div className="font-bold text-slate-900 flex items-center space-x-1.5">
-                    <Building2 className="w-4 h-4 text-slate-600" />
-                    <span>Facility & Job Role Binding</span>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-slate-700 font-semibold mb-1">Assigned Facility / Branch *</label>
-                      <select
-                        value={facilityId}
-                        onChange={(e) => handleFacilityChange(e.target.value)}
-                        className="w-full p-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                      >
-                        {manageableFacilities.map(f => (
-                          <option key={f.id} value={f.id}>{f.name} ({f.code})</option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-slate-700 font-semibold mb-1">
-                        Assigned Job Role (from Facility) *
-                      </label>
-                      {availableJobRoles.length > 0 ? (
-                        <select
-                          value={jobRole}
-                          onChange={(e) => setJobRole(e.target.value)}
-                          className="w-full p-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                        >
-                          {availableJobRoles.map(jr => (
-                            <option key={jr.id} value={jr.roleName}>{jr.roleName}</option>
-                          ))}
-                        </select>
-                      ) : (
-                        <input
-                          type="text"
-                          value={jobRole}
-                          onChange={(e) => setJobRole(e.target.value)}
-                          placeholder="e.g. Operations Assistant"
-                          className="w-full p-2.5 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                        />
-                      )}
-                      <div className="text-[10px] text-slate-400 mt-1">
-                        {availableJobRoles.length > 0 ? `${availableJobRoles.length} roles configured for this branch` : 'No pre-set roles. Type custom role title.'}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* Branch Admin Scope (Multi-Branch Selection) */}
+              {/* Multi-Facility Assignment for Branch Admin */}
               {role === 'branch_admin' && (
-                <div className="p-3.5 bg-indigo-50/50 rounded-xl border border-indigo-100 space-y-2.5">
-                  <div className="font-bold text-slate-900 flex items-center justify-between">
-                    <span className="flex items-center space-x-1.5">
-                      <Building2 className="w-4 h-4 text-indigo-600" />
-                      <span>Select Managed Facilities / Branches</span>
-                    </span>
-                    <span className="text-[10px] text-indigo-700 font-medium">
-                      {assignedFacilityIds.length} selected
-                    </span>
+                <div className="p-3.5 bg-blue-50/60 border border-blue-200 rounded-xl space-y-2">
+                  <div className="font-bold text-blue-900 uppercase tracking-wider text-[11px] flex items-center gap-1.5">
+                    <Layers className="w-3.5 h-3.5 text-blue-600" />
+                    Multi-Facility Scope Selection (Assigned Branches & CSCs)
                   </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-40 overflow-y-auto p-1 bg-white rounded-lg border border-indigo-100">
-                    {facilities.map(f => {
-                      const isSelected = assignedFacilityIds.includes(f.id);
-                      return (
-                        <label
-                          key={f.id}
-                          className={`flex items-center space-x-2 p-2 rounded-md cursor-pointer transition ${
-                            isSelected ? 'bg-indigo-50 border border-indigo-200' : 'hover:bg-slate-50'
-                          }`}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={isSelected}
-                            onChange={() => handleToggleAssignedFacility(f.id)}
-                            className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                          />
-                          <span className="font-medium text-slate-800 truncate text-[11px]">{f.name}</span>
-                        </label>
-                      );
-                    })}
+                  <p className="text-[11px] text-blue-800">
+                    Select all facilities and CSCs this Branch Admin has supervisory authority to view and audit:
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-36 overflow-y-auto pt-1">
+                    {facilities.map(fac => (
+                      <label key={fac.id} className="flex items-center gap-2 p-1.5 bg-white rounded-lg border border-slate-200 hover:bg-blue-50 text-slate-700 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={assignedFacilityIds.includes(fac.id)}
+                          onChange={() => toggleAssignedFacility(fac.id)}
+                          className="rounded text-blue-600 focus:ring-blue-500"
+                        />
+                        <span className="truncate">{fac.name}</span>
+                      </label>
+                    ))}
                   </div>
                 </div>
               )}
 
-              {/* Delete Capability Toggle */}
-              <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-between">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <div className="font-bold text-slate-900 flex items-center space-x-1.5">
-                    <Trash2 className="w-4 h-4 text-slate-600" />
-                    <span>Delete Capability (Granular Permission)</span>
+                  <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">
+                    Job Role / Designation
+                  </label>
+                  <input
+                    type="text"
+                    value={jobRole}
+                    onChange={(e) => setJobRole(e.target.value)}
+                    placeholder="e.g. Area Operations Engineer"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">
+                    Department
+                  </label>
+                  <input
+                    type="text"
+                    value={department}
+                    onChange={(e) => setDepartment(e.target.value)}
+                    placeholder="e.g. Regional Distribution Maintenance"
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+              </div>
+
+              {/* Granular Delete Rights ON/OFF Toggle */}
+              <div className="p-4 bg-amber-50/60 border border-amber-200 rounded-xl flex items-center justify-between">
+                <div>
+                  <div className="font-bold text-amber-900 uppercase tracking-wider text-[11px] flex items-center gap-1.5">
+                    <Shield className="w-3.5 h-3.5 text-amber-600" />
+                    Granular Record Deletion Capability
                   </div>
-                  <p className="text-[11px] text-slate-500 mt-0.5">
-                    Controls whether this user can remove emission records in Scope 1, 2 & 3
+                  <p className="text-[11px] text-amber-800 mt-0.5">
+                    Enable or disable this officer's permission to permanently delete Scope 1, 2, or 3 activity records.
                   </p>
                 </div>
 
                 <label className="relative inline-flex items-center cursor-pointer">
                   <input
                     type="checkbox"
-                    checked={canDelete}
-                    onChange={(e) => setCanDelete(e.target.checked)}
+                    checked={role === 'super_admin' || userCanDelete}
+                    disabled={role === 'super_admin'}
+                    onChange={(e) => setUserCanDelete(e.target.checked)}
                     className="sr-only peer"
                   />
-                  <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
+                  <div className="w-11 h-6 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
                 </label>
               </div>
 
               {/* Allowed Modules Checklist */}
-              {role !== 'super_admin' && (
-                <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
-                  <label className="block text-slate-700 font-bold">Permitted System Modules</label>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                    {AVAILABLE_MODULES.map(mod => {
-                      const isChecked = allowedModules.includes(mod.key);
-                      return (
-                        <label
-                          key={mod.key}
-                          className={`flex items-center space-x-2 p-2 rounded-lg border text-[11px] cursor-pointer transition ${
-                            isChecked ? 'bg-white border-blue-400 font-medium text-slate-900 shadow-xs' : 'bg-slate-100/60 border-slate-200 text-slate-500'
-                          }`}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={isChecked}
-                            onChange={() => handleToggleModule(mod.key)}
-                            className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                          />
-                          <span className="truncate">{mod.label}</span>
-                        </label>
-                      );
-                    })}
-                  </div>
+              <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                <div className="font-bold text-slate-700 uppercase tracking-wider text-[11px]">
+                  Authorized Functional Modules
                 </div>
-              )}
-
-              {/* Department & Contact */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-slate-700 font-semibold mb-1">Department</label>
-                  <input
-                    type="text"
-                    value={department}
-                    onChange={(e) => setDepartment(e.target.value)}
-                    placeholder="e.g. Operations / Billing"
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-700 font-semibold mb-1">Contact Phone</label>
-                  <input
-                    type="text"
-                    value={contactNumber}
-                    onChange={(e) => setContactNumber(e.target.value)}
-                    placeholder="+94 11 286 5500"
-                    className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none"
-                  />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                  {ALL_MODULES.map(m => (
+                    <label key={m.id} className="flex items-start gap-2 p-2 bg-white rounded-lg border border-slate-200 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={role === 'super_admin' || allowedModules.includes(m.id)}
+                        disabled={role === 'super_admin'}
+                        onChange={() => toggleModule(m.id)}
+                        className="mt-0.5 rounded text-emerald-600 focus:ring-emerald-500"
+                      />
+                      <div>
+                        <div className="font-bold text-slate-800">{m.label}</div>
+                        <div className="text-[10px] text-slate-400">{m.desc}</div>
+                      </div>
+                    </label>
+                  ))}
                 </div>
               </div>
 
-              {/* Actions */}
-              <div className="flex items-center justify-end space-x-3 pt-4 border-t border-slate-100">
-                <button
-                  type="button"
-                  onClick={() => setShowModal(false)}
-                  className="px-4 py-2.5 text-slate-600 hover:bg-slate-100 rounded-xl font-medium"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded-xl shadow-sm transition"
-                >
-                  {editingUser ? 'Save User Changes' : 'Create User'}
-                </button>
+              {/* Account Status Toggle */}
+              <div className="flex items-center gap-2 pt-1">
+                <input
+                  type="checkbox"
+                  id="isActiveCheck"
+                  checked={isActive}
+                  onChange={(e) => setIsActive(e.target.checked)}
+                  className="rounded text-emerald-600 focus:ring-emerald-500"
+                />
+                <label htmlFor="isActiveCheck" className="font-semibold text-slate-700 cursor-pointer">
+                  Account is Active (Officer can log in and submit data)
+                </label>
               </div>
+
             </form>
+
+            {/* Modal Footer (Permanently Visible) */}
+            <div className="px-6 py-4 bg-slate-100 border-t border-slate-200 flex items-center justify-end gap-3 shrink-0">
+              <button
+                type="button"
+                onClick={() => setIsModalOpen(false)}
+                className="px-4 py-2 bg-white hover:bg-slate-200 text-slate-700 font-semibold rounded-xl border border-slate-300 transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                form="user-form"
+                className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl shadow transition cursor-pointer"
+              >
+                {editingUser ? 'Save User Profile' : 'Provision Account'}
+              </button>
+            </div>
+
           </div>
         </div>
       )}
+
     </div>
   );
 };

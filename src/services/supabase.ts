@@ -1,25 +1,23 @@
-/// <reference types="vite/client" />
 import { createClient } from '@supabase/supabase-js';
 
-// Supabase client instance (connects with environment variables)
-const supabaseUrl = (import.meta as any).env?.VITE_SUPABASE_URL || 'https://rrnxnarcegljasuamnzu.supabase.co';
-const supabaseAnonKey = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || '';
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
 
 export const supabase = (supabaseUrl && supabaseAnonKey) 
-  ? createClient(supabaseUrl, supabaseAnonKey)
-  : (supabaseUrl ? createClient(supabaseUrl, 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJybnhuYXJjZWdsamFzdWFtbnp1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODcyMzIzMjQsImV4cCI6MjEwMjgwODMyNH0.N_5mZNOjTT0r3YMyjlZYgPuoMKlUP_WJJqyOzwE-cYA') : null);
+  ? createClient(supabaseUrl, supabaseAnonKey) 
+  : null;
 
 export const isSupabaseConfigured = !!supabase;
 export const configuredSupabaseUrl = supabaseUrl;
 
-// Supabase Auth Helpers
+// Supabase Auth Integration
 export async function signInWithSupabaseAuth(email: string, password?: string) {
   if (!supabase) {
-    throw new Error('Supabase client not initialized');
+    throw new Error('Supabase client is not configured with environment variables.');
   }
   const pwd = password || 'Sadmin@cf369';
   const { data, error } = await supabase.auth.signInWithPassword({
-    email,
+    email: email.trim(),
     password: pwd
   });
   if (error) {
@@ -30,11 +28,11 @@ export async function signInWithSupabaseAuth(email: string, password?: string) {
 
 export async function signUpWithSupabaseAuth(email: string, password?: string, metadata?: any) {
   if (!supabase) {
-    throw new Error('Supabase client not initialized');
+    throw new Error('Supabase client is not configured.');
   }
   const pwd = password || 'Sadmin@cf369';
   const { data, error } = await supabase.auth.signUp({
-    email,
+    email: email.trim(),
     password: pwd,
     options: {
       data: metadata
@@ -48,30 +46,31 @@ export async function signUpWithSupabaseAuth(email: string, password?: string, m
 
 export async function signOutSupabaseAuth() {
   if (!supabase) return;
-  await supabase.auth.signOut();
+  try {
+    await supabase.auth.signOut();
+  } catch (err) {
+    console.warn('Supabase signout notice:', err);
+  }
 }
 
 export async function testSupabaseConnection(): Promise<{ success: boolean; message: string; error?: any }> {
   if (!supabase) {
-    return { success: false, message: 'Supabase client is not initialized.' };
+    return { success: false, message: 'Supabase client is not configured with VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.' };
   }
   try {
-    // Attempt a light ping/query
-    const { data, error } = await supabase.from('leco_facilities').select('id, name').limit(1);
+    const { data, error } = await supabase.from('facilities').select('count', { count: 'exact', head: true });
     if (error) {
-      // If table does not exist yet, connection itself is valid
-      if (error.code === '42P01' || error.message?.includes('relation') || error.message?.includes('does not exist')) {
+      if (error.code === '42P01') {
         return { 
-          success: true, 
-          message: 'Connected to Supabase project successfully! (Tables pending creation via SQL schema)',
-          error: null 
+          success: false, 
+          message: 'Connected to Supabase project, but tables are not created yet. Please execute the SQL Schema in your Supabase SQL Editor.', 
+          error 
         };
       }
-      return { success: true, message: `Connected to Supabase endpoint (${error.message || 'Ready'})`, error };
+      return { success: false, message: `Database query error: ${error.message}`, error };
     }
-    return { success: true, message: `Connected to Supabase PostgreSQL database (${data?.length || 0} facilities found)` };
+    return { success: true, message: 'Successfully connected and verified tables in Supabase Postgres database!' };
   } catch (err: any) {
-    return { success: false, message: err?.message || 'Connection test failed', error: err };
+    return { success: false, message: `Connection failed: ${err.message || err}`, error: err };
   }
 }
-
