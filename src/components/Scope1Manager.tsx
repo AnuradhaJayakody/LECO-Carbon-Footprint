@@ -27,6 +27,9 @@ export const Scope1Manager: React.FC = () => {
     canDelete, 
     notify, 
     user,
+    isSuperAdmin,
+    isBranchAdmin,
+    isFacilityUser,
     getScopedFacilities
   } = useAuth();
 
@@ -75,8 +78,12 @@ export const Scope1Manager: React.FC = () => {
   }, [selectedYear, selectedFacilityId]);
 
   const openAddModal = () => {
+    const defaultFacId = (selectedFacilityId !== 'ALL' && selectedFacilityId) 
+      ? selectedFacilityId 
+      : (user?.facilityId || scopedFacilities[0]?.id || '');
+    
     setEditingRecord(null);
-    setFacilityId(selectedFacilityId !== 'ALL' ? selectedFacilityId : (scopedFacilities[0]?.id || ''));
+    setFacilityId(defaultFacId);
     setReportingMonth(new Date().getMonth() + 1);
     setCategory('stationary_generator');
     setSourceName('Emergency Diesel Generator 150 kVA');
@@ -442,13 +449,25 @@ export const Scope1Manager: React.FC = () => {
               
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">
-                    Facility / CSC *
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block font-bold text-slate-700 uppercase tracking-wider">
+                      Facility / CSC *
+                    </label>
+                    {isFacilityUser && (
+                      <span className="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full font-semibold">
+                        🔒 Assigned CSC
+                      </span>
+                    )}
+                  </div>
                   <select
                     value={facilityId}
                     onChange={(e) => setFacilityId(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-800 font-semibold focus:outline-none focus:ring-2 focus:ring-orange-500"
+                    disabled={isFacilityUser && scopedFacilities.length === 1}
+                    className={`w-full px-3 py-2 border rounded-xl text-slate-800 font-semibold focus:outline-none focus:ring-2 focus:ring-orange-500 ${
+                      isFacilityUser && scopedFacilities.length === 1 
+                        ? 'bg-slate-100 border-slate-200 cursor-not-allowed text-slate-600' 
+                        : 'bg-slate-50 border-slate-300'
+                    }`}
                   >
                     {scopedFacilities.map(fac => (
                       <option key={fac.id} value={fac.id}>
