@@ -128,11 +128,12 @@ export function fromFacilityRow(row: any): Facility {
 export function toUserProfileRow(user: Partial<User>): Record<string, any> {
   const row: Record<string, any> = {};
   if (user.id !== undefined) row.id = user.id;
-  if (user.authUserId !== undefined) row.auth_user_id = user.authUserId;
+  if (user.authUserId !== undefined && user.authUserId) row.auth_user_id = user.authUserId;
   if (user.email !== undefined) row.email = user.email.toLowerCase().trim();
-  if (user.name !== undefined) row.name = user.name;
+  if (user.name !== undefined) row.name = user.name.trim();
   if (user.role !== undefined) row.role = user.role;
   if (user.facilityId !== undefined) row.facility_id = user.facilityId || null;
+  if (user.facilityName !== undefined) row.facility_name = user.facilityName || null;
   if (user.assignedFacilityIds !== undefined) row.assigned_facility_ids = user.assignedFacilityIds;
   if (user.jobRole !== undefined) row.job_role = user.jobRole;
   if (user.department !== undefined) row.department = user.department;

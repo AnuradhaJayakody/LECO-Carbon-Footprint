@@ -91,10 +91,34 @@ export const UserManager: React.FC = () => {
             .select('*')
             .order('name', { ascending: true });
 
-          if (!error && data && data.length > 0) {
-            setUsersList(data.map(fromUserProfileRow));
-            setLoading(false);
-            return;
+          if (!error && data !== null) {
+            if (data.length > 0) {
+              setUsersList(data.map(fromUserProfileRow));
+              setLoading(false);
+              return;
+            } else {
+              // Table exists and is empty in Supabase, load and seed default accounts
+              const apiUsers = await api.getUsers();
+              if (apiUsers && apiUsers.length > 0) {
+                for (const u of apiUsers) {
+                  try {
+                    const r = toUserProfileRow(u);
+                    await supabase.from('user_profiles').insert([{ ...r, facility_id: null }]);
+                  } catch (e) {
+                    // ignore initial seed error
+                  }
+                }
+                const refreshed = await supabase.from('user_profiles').select('*').order('name', { ascending: true });
+                if (refreshed.data && refreshed.data.length > 0) {
+                  setUsersList(refreshed.data.map(fromUserProfileRow));
+                  setLoading(false);
+                  return;
+                }
+              }
+              setUsersList([]);
+              setLoading(false);
+              return;
+            }
           }
         } catch (sbErr) {
           console.warn('Supabase fetch user_profiles notice:', sbErr);
@@ -193,13 +217,30 @@ export const UserManager: React.FC = () => {
 
     try {
       if (editingUser) {
-        // Execute Supabase update if client configured
+        // Execute Supabase update directly to user_profiles table
         if (supabase) {
           try {
-            const { error: sbErr } = await supabase
+            const row = toUserProfileRow(payload);
+            let { error: sbErr } = await supabase
               .from('user_profiles')
-              .update(toUserProfileRow(payload))
+              .update(row)
               .eq('id', editingUser.id);
+
+            // Foreign key fallback on facility_id if facility isn't in DB
+            if (sbErr && (sbErr.code === '23503' || sbErr.message?.includes('violates foreign key constraint'))) {
+              const safeRow = { ...row, facility_id: null };
+              const retry = await supabase.from('user_profiles').update(safeRow).eq('id', editingUser.id);
+              sbErr = retry.error;
+            }
+
+            // Also match by email if id was different
+            if (editingUser.email) {
+              await supabase
+                .from('user_profiles')
+                .update(row)
+                .eq('email', editingUser.email.toLowerCase().trim());
+            }
+
             if (sbErr) console.warn('Supabase user update notice:', sbErr);
           } catch (e) {
             console.warn('Supabase user update error:', e);
@@ -210,30 +251,57 @@ export const UserManager: React.FC = () => {
         notify(`User profile for "${payload.name}" updated successfully!`, 'success');
       } else {
         const newUserId = `usr-${Date.now().toString(36)}`;
-        const newRecord = {
+        const newRecord: User = {
           ...payload,
-          id: newUserId
-        };
+          id: newUserId,
+          createdAt: new Date().toISOString()
+        } as User;
 
-        // If Supabase is configured, also register Supabase Auth credentials & profile
+        // If Supabase Auth is configured, register Supabase Auth credentials & get auth UID
         if (isSupabaseConfigured) {
           try {
-            await signUpWithSupabaseAuth(email.trim(), password || 'Sadmin@cf369', {
+            const authRes = await signUpWithSupabaseAuth(email.trim(), password || 'Sadmin@cf369', {
               name: name.trim(),
               role,
               facilityId
             });
+            if (authRes?.user?.id) {
+              newRecord.authUserId = authRes.user.id;
+            }
           } catch (sbErr: any) {
             console.warn('Supabase Auth user creation note:', sbErr?.message || sbErr);
           }
         }
 
+        // Direct Supabase Insertion Query into user_profiles table
         if (supabase) {
           try {
-            const { error: sbErr } = await supabase
+            const row = toUserProfileRow(newRecord);
+            let { error: insertErr } = await supabase
               .from('user_profiles')
-              .insert([toUserProfileRow(newRecord)]);
-            if (sbErr) console.warn('Supabase user insert notice:', sbErr);
+              .insert([row]);
+
+            // If foreign key constraint failed on facility_id, retry with facility_id = null
+            if (insertErr && (insertErr.code === '23503' || insertErr.message?.includes('violates foreign key constraint'))) {
+              console.warn('Foreign key notice for facility_id, retrying insert with facility_id = null');
+              const safeRow = { ...row, facility_id: null };
+              const retry = await supabase.from('user_profiles').insert([safeRow]);
+              insertErr = retry.error;
+            }
+
+            // If email already exists in user_profiles, update existing record
+            if (insertErr && (insertErr.code === '23505' || insertErr.message?.includes('duplicate key'))) {
+              console.warn('User already exists in Supabase, updating record by email:', row.email);
+              const updateRes = await supabase.from('user_profiles').update(row).eq('email', row.email);
+              insertErr = updateRes.error;
+            }
+
+            if (insertErr) {
+              console.error('Supabase user insert error:', insertErr);
+              notify(`Database notice: ${insertErr.message}`, 'warning');
+            } else {
+              console.log('Successfully inserted new user into Supabase user_profiles:', newRecord.email);
+            }
           } catch (e) {
             console.warn('Supabase user insert error:', e);
           }
@@ -256,12 +324,22 @@ export const UserManager: React.FC = () => {
       return;
     }
     try {
+      const targetUser = usersList.find(u => u.id === id);
+
       if (supabase) {
         try {
           const { error: sbErr } = await supabase
             .from('user_profiles')
             .delete()
             .eq('id', id);
+
+          if (targetUser?.email) {
+            await supabase
+              .from('user_profiles')
+              .delete()
+              .eq('email', targetUser.email.toLowerCase().trim());
+          }
+
           if (sbErr) console.warn('Supabase user delete notice:', sbErr);
         } catch (e) {
           console.warn('Supabase user delete error:', e);

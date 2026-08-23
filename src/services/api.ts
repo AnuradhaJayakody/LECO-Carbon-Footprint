@@ -228,11 +228,25 @@ export const api = {
     if (supabase) {
       try {
         const row = toUserProfileRow(user);
-        const { data, error } = await supabase
+        let { data, error } = await supabase
           .from('user_profiles')
           .insert([row])
           .select()
-          .single();
+          .maybeSingle();
+
+        if (error && (error.code === '23503' || error.message?.includes('violates foreign key constraint'))) {
+          // If foreign key violation on facility_id, retry with facility_id = null
+          const safeRow = { ...row, facility_id: null };
+          const retry = await supabase.from('user_profiles').insert([safeRow]).select().maybeSingle();
+          data = retry.data;
+          error = retry.error;
+        }
+
+        if (error && (error.code === '23505' || error.message?.includes('duplicate key'))) {
+          const updateRes = await supabase.from('user_profiles').update(row).eq('email', row.email).select().maybeSingle();
+          data = updateRes.data;
+          error = updateRes.error;
+        }
 
         if (error) {
           console.warn('Supabase insert user_profile warning:', error);
@@ -261,12 +275,24 @@ export const api = {
     if (supabase) {
       try {
         const row = toUserProfileRow(updates);
-        const { data, error } = await supabase
+        let { data, error } = await supabase
           .from('user_profiles')
           .update(row)
           .eq('id', id)
           .select()
-          .single();
+          .maybeSingle();
+
+        if (error && (error.code === '23503' || error.message?.includes('violates foreign key constraint'))) {
+          const safeRow = { ...row, facility_id: null };
+          const retry = await supabase.from('user_profiles').update(safeRow).eq('id', id).select().maybeSingle();
+          data = retry.data;
+          error = retry.error;
+        }
+
+        if (!data && updates.email) {
+          const emailRetry = await supabase.from('user_profiles').update(row).eq('email', updates.email.toLowerCase().trim()).select().maybeSingle();
+          if (emailRetry.data) data = emailRetry.data;
+        }
 
         if (error) {
           console.warn('Supabase update user_profile warning:', error);
