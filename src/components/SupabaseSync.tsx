@@ -89,7 +89,7 @@ CREATE TABLE IF NOT EXISTS public.user_profiles (
     id TEXT PRIMARY KEY,
     auth_user_id UUID REFERENCES auth.users(id) ON DELETE SET NULL,
     email TEXT NOT NULL UNIQUE,
-    name TEXT NOT NULL,
+    full_name TEXT NOT NULL,
     role TEXT NOT NULL DEFAULT 'facility_user',
     facility_id TEXT REFERENCES public.facilities(id) ON DELETE SET NULL,
     assigned_facility_ids TEXT[] DEFAULT '{}',
@@ -102,6 +102,19 @@ CREATE TABLE IF NOT EXISTS public.user_profiles (
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Ensure all optional columns exist if table was previously created
+DO $$ 
+BEGIN
+    ALTER TABLE public.user_profiles ADD COLUMN IF NOT EXISTS full_name TEXT;
+    ALTER TABLE public.user_profiles ADD COLUMN IF NOT EXISTS assigned_facility_ids TEXT[] DEFAULT '{}';
+    ALTER TABLE public.user_profiles ADD COLUMN IF NOT EXISTS job_role TEXT;
+    ALTER TABLE public.user_profiles ADD COLUMN IF NOT EXISTS department TEXT;
+    ALTER TABLE public.user_profiles ADD COLUMN IF NOT EXISTS contact_number TEXT;
+    ALTER TABLE public.user_profiles ADD COLUMN IF NOT EXISTS can_delete BOOLEAN DEFAULT FALSE;
+    ALTER TABLE public.user_profiles ADD COLUMN IF NOT EXISTS allowed_modules TEXT[] DEFAULT ARRAY['dashboard', 'scope1', 'scope2', 'scope3', 'reports', 'calculator'];
+    ALTER TABLE public.user_profiles ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE;
+END $$;
 
 -- 4. Scope 1 Records (Direct GHG: Diesel, Fleet, SF6)
 CREATE TABLE IF NOT EXISTS public.scope1_records (

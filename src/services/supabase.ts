@@ -31,18 +31,48 @@ export async function signUpWithSupabaseAuth(email: string, password?: string, m
   if (!supabase) {
     throw new Error('Supabase client is not configured.');
   }
-  const pwd = password || 'Sadmin@cf369';
-  const { data, error } = await supabase.auth.signUp({
-    email: email.trim(),
-    password: pwd,
-    options: {
-      data: metadata
+  const cleanEmail = email.trim().toLowerCase();
+  const pwd = password?.trim() || 'Sadmin@cf369';
+  
+  try {
+    const { data, error } = await supabase.auth.signUp({
+      email: cleanEmail,
+      password: pwd,
+      options: {
+        data: {
+          ...metadata,
+          full_name: metadata?.name || metadata?.full_name,
+          name: metadata?.name || metadata?.full_name
+        }
+      }
+    });
+
+    if (error) {
+      throw error;
     }
-  });
-  if (error) {
-    throw error;
+
+    // When email confirmation is enabled and the user already exists in auth.users,
+    // Supabase returns a dummy user object with an empty identities array: identities: []
+    if (data?.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
+      const err: any = new Error(`User with email "${cleanEmail}" is already registered in Supabase Authentication.`);
+      err.code = 'user_already_exists';
+      err.status = 422;
+      err.user = data.user;
+      throw err;
+    }
+
+    return data;
+  } catch (err: any) {
+    // Check if error is network/fetch related
+    const msg = err?.message || String(err);
+    if (msg.includes('Failed to fetch') || msg.includes('NetworkError') || msg.includes('fetch failed')) {
+      const networkErr: any = new Error(`Supabase Auth endpoint unreachable (Failed to fetch).`);
+      networkErr.isNetworkError = true;
+      networkErr.originalError = err;
+      throw networkErr;
+    }
+    throw err;
   }
-  return data;
 }
 
 export async function signOutSupabaseAuth() {
@@ -125,12 +155,44 @@ export function fromFacilityRow(row: any): Facility {
   };
 }
 
+export function isValidUUID(str: any): boolean {
+  if (typeof str !== 'string') return false;
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(str);
+}
+
+export function generateUUID(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    try {
+      return crypto.randomUUID();
+    } catch {
+      // fallback
+    }
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
 export function toUserProfileRow(user: Partial<User>): Record<string, any> {
   const row: Record<string, any> = {};
-  if (user.id !== undefined) row.id = user.id;
-  if (user.authUserId !== undefined && user.authUserId) row.auth_user_id = user.authUserId;
+  if (user.id !== undefined) {
+    if (isValidUUID(user.id)) {
+      row.id = user.id;
+    } else if (user.authUserId && isValidUUID(user.authUserId)) {
+      row.id = user.authUserId;
+    } else {
+      row.id = generateUUID();
+    }
+  }
+  if (user.authUserId !== undefined && user.authUserId && isValidUUID(user.authUserId)) {
+    row.auth_user_id = user.authUserId;
+  }
   if (user.email !== undefined) row.email = user.email.toLowerCase().trim();
-  if (user.name !== undefined) row.name = user.name.trim();
+  if (user.name !== undefined) {
+    row.full_name = user.name.trim();
+  }
   if (user.role !== undefined) row.role = user.role;
   if (user.facilityId !== undefined) row.facility_id = user.facilityId || null;
   if (user.facilityName !== undefined) row.facility_name = user.facilityName || null;
@@ -148,7 +210,7 @@ export function fromUserProfileRow(row: any): User {
   return {
     id: row.id,
     email: row.email,
-    name: row.name,
+    name: row.full_name || row.name || 'LECO Officer',
     role: row.role,
     facilityId: row.facility_id || row.facilityId,
     facilityName: row.facility_name || row.facilityName,
@@ -301,4 +363,148 @@ export function fromScope3Row(row: any): Scope3Record {
     createdByName: row.created_by_name || row.createdByName || row.created_by || row.createdBy,
     createdAt: row.created_at || row.createdAt || new Date().toISOString()
   };
+}
+
+/**
+ * Robust Supabase user upsert helper.
+ * Automatically identifies and prunes columns that do not exist in the remote user_profiles table (PGRST204),
+ * handles foreign key constraints (23503), and handles unique constraint duplicates (23505).
+ */
+export async function safeSupabaseUpsertUser(
+  operation: 'insert' | 'update',
+  userPayload: Record<string, any>,
+  matchId?: string,
+  matchEmail?: string
+): Promise<{ success: boolean; data?: any; error?: any; isNetworkError?: boolean }> {
+  if (!supabase) return { success: false, error: new Error('Supabase client not initialized') };
+
+  let currentPayload = { ...userPayload };
+  const maxRetries = 12;
+  let attempt = 0;
+
+  while (attempt < maxRetries) {
+    attempt++;
+    let queryResult: any;
+
+    try {
+      if (operation === 'insert') {
+        queryResult = await supabase.from('user_profiles').insert([currentPayload]).select().maybeSingle();
+      } else {
+        let query = supabase.from('user_profiles').update(currentPayload);
+        if (matchId) {
+          queryResult = await query.eq('id', matchId).select().maybeSingle();
+        } else if (matchEmail) {
+          queryResult = await query.eq('email', matchEmail.toLowerCase().trim()).select().maybeSingle();
+        } else if (currentPayload.email) {
+          queryResult = await query.eq('email', currentPayload.email.toLowerCase().trim()).select().maybeSingle();
+        } else {
+          queryResult = await query.eq('id', currentPayload.id).select().maybeSingle();
+        }
+      }
+    } catch (err: any) {
+      queryResult = { error: err };
+    }
+
+    const { data, error } = queryResult;
+
+    if (!error) {
+      return { success: true, data };
+    }
+
+    // 0. Network or endpoint unreachable ("Failed to fetch")
+    const errorMsg = error.message || String(error || '');
+    const errorDetails = error.details || '';
+    if (
+      errorMsg.includes('Failed to fetch') ||
+      errorMsg.includes('NetworkError') ||
+      errorMsg.includes('fetch failed') ||
+      errorDetails.includes('Failed to fetch')
+    ) {
+      console.warn('[Supabase Schema Safe] Supabase endpoint unreachable (Failed to fetch).');
+      return { success: false, isNetworkError: true, error };
+    }
+
+    // 1. UUID syntax error: code 22P02 "invalid input syntax for type uuid"
+    if (error.code === '22P02' || error.message?.includes('invalid input syntax for type uuid')) {
+      console.warn('[Supabase Schema Safe] UUID syntax error (22P02):', error.message);
+      
+      // If currentPayload.id is not a valid UUID, generate one
+      if (currentPayload.id && !isValidUUID(currentPayload.id)) {
+        currentPayload.id = generateUUID();
+        continue;
+      }
+
+      // If auth_user_id is not a valid UUID, remove it
+      if (currentPayload.auth_user_id && !isValidUUID(currentPayload.auth_user_id)) {
+        delete currentPayload.auth_user_id;
+        continue;
+      }
+
+      // If facility_id is not a valid UUID and errored on uuid type
+      if (currentPayload.facility_id && !isValidUUID(currentPayload.facility_id)) {
+        currentPayload.facility_id = null;
+        continue;
+      }
+
+      // On insert, try deleting id completely to let PostgreSQL gen_random_uuid() work
+      if (operation === 'insert' && currentPayload.id) {
+        delete currentPayload.id;
+        continue;
+      }
+    }
+
+    // 2. PostgREST missing column error: code PGRST204 or "Could not find the '...' column"
+    if (error.code === 'PGRST204' || error.message?.includes('Could not find the') || error.message?.includes('column of') || error.message?.includes('does not exist')) {
+      const match = error.message?.match(/Could not find the '([^']+)' column/) ||
+                    error.message?.match(/column [a-zA-Z0-9_.]*([a-zA-Z0-9_]+) does not exist/);
+      const missingCol = match ? match[1] : null;
+
+      if (missingCol && currentPayload[missingCol] !== undefined) {
+        console.warn(`[Supabase Schema Safe] Pruning nonexistent column '${missingCol}' from user_profiles table payload`);
+        delete currentPayload[missingCol];
+        continue;
+      }
+
+      // If regex did not extract, try removing non-core columns one by one
+      const optionalCols = [
+        'allowed_modules',
+        'assigned_facility_ids',
+        'can_delete',
+        'facility_name',
+        'job_role',
+        'department',
+        'contact_number',
+        'is_active',
+        'auth_user_id'
+      ];
+      const nextCol = optionalCols.find(col => currentPayload[col] !== undefined);
+      if (nextCol) {
+        console.warn(`[Supabase Schema Safe] Pruning optional column '${nextCol}' and retrying`);
+        delete currentPayload[nextCol];
+        continue;
+      }
+    }
+
+    // 2. Foreign key violation on facility_id (23503)
+    if ((error.code === '23503' || error.message?.includes('foreign key') || error.message?.includes('violates foreign key')) && currentPayload.facility_id) {
+      console.warn('[Supabase Schema Safe] Facility ID foreign key constraint violation. Setting facility_id = null');
+      currentPayload.facility_id = null;
+      continue;
+    }
+
+    // 3. Duplicate email on insert -> switch seamlessly to update
+    if (operation === 'insert' && (error.code === '23505' || error.message?.includes('duplicate key') || error.message?.includes('unique constraint'))) {
+      console.warn('[Supabase Schema Safe] User with this email already exists. Updating record instead.');
+      return safeSupabaseUpsertUser('update', currentPayload, undefined, currentPayload.email);
+    }
+
+    // 4. If ID update matched 0 rows, fallback to matching by email
+    if (operation === 'update' && matchId && matchEmail && matchId !== matchEmail) {
+      return safeSupabaseUpsertUser('update', currentPayload, undefined, matchEmail);
+    }
+
+    return { success: false, error };
+  }
+
+  return { success: false, error: new Error('Exceeded maximum schema fallback retries') };
 }

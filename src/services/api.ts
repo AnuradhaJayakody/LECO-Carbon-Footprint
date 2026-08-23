@@ -13,6 +13,7 @@ import {
   fromFacilityRow, 
   toUserProfileRow, 
   fromUserProfileRow,
+  safeSupabaseUpsertUser,
   toScope1Row,
   fromScope1Row,
   toScope2Row,
@@ -201,10 +202,17 @@ export const api = {
   getUsers: async (): Promise<User[]> => {
     if (supabase) {
       try {
-        const { data, error } = await supabase
+        let { data, error } = await supabase
           .from('user_profiles')
           .select('*')
-          .order('name', { ascending: true });
+          .order('full_name', { ascending: true });
+
+        if (error) {
+          // If order by full_name failed, try fallback without column order
+          const fallback = await supabase.from('user_profiles').select('*');
+          data = fallback.data;
+          error = fallback.error;
+        }
 
         if (!error && data && data.length > 0) {
           return data.map(fromUserProfileRow);
@@ -228,30 +236,11 @@ export const api = {
     if (supabase) {
       try {
         const row = toUserProfileRow(user);
-        let { data, error } = await supabase
-          .from('user_profiles')
-          .insert([row])
-          .select()
-          .maybeSingle();
-
-        if (error && (error.code === '23503' || error.message?.includes('violates foreign key constraint'))) {
-          // If foreign key violation on facility_id, retry with facility_id = null
-          const safeRow = { ...row, facility_id: null };
-          const retry = await supabase.from('user_profiles').insert([safeRow]).select().maybeSingle();
-          data = retry.data;
-          error = retry.error;
-        }
-
-        if (error && (error.code === '23505' || error.message?.includes('duplicate key'))) {
-          const updateRes = await supabase.from('user_profiles').update(row).eq('email', row.email).select().maybeSingle();
-          data = updateRes.data;
-          error = updateRes.error;
-        }
-
-        if (error) {
-          console.warn('Supabase insert user_profile warning:', error);
-        } else if (data) {
-          createdUser = fromUserProfileRow(data);
+        const result = await safeSupabaseUpsertUser('insert', row);
+        if (result.success && result.data) {
+          createdUser = fromUserProfileRow(result.data);
+        } else if (result.error) {
+          console.warn('Supabase insert user_profile notice:', result.error);
         }
       } catch (err) {
         console.warn('Supabase createUser exception:', err);
@@ -275,29 +264,11 @@ export const api = {
     if (supabase) {
       try {
         const row = toUserProfileRow(updates);
-        let { data, error } = await supabase
-          .from('user_profiles')
-          .update(row)
-          .eq('id', id)
-          .select()
-          .maybeSingle();
-
-        if (error && (error.code === '23503' || error.message?.includes('violates foreign key constraint'))) {
-          const safeRow = { ...row, facility_id: null };
-          const retry = await supabase.from('user_profiles').update(safeRow).eq('id', id).select().maybeSingle();
-          data = retry.data;
-          error = retry.error;
-        }
-
-        if (!data && updates.email) {
-          const emailRetry = await supabase.from('user_profiles').update(row).eq('email', updates.email.toLowerCase().trim()).select().maybeSingle();
-          if (emailRetry.data) data = emailRetry.data;
-        }
-
-        if (error) {
-          console.warn('Supabase update user_profile warning:', error);
-        } else if (data) {
-          updatedUser = fromUserProfileRow(data);
+        const result = await safeSupabaseUpsertUser('update', row, id, updates.email);
+        if (result.success && result.data) {
+          updatedUser = fromUserProfileRow(result.data);
+        } else if (result.error) {
+          console.warn('Supabase update user_profile notice:', result.error);
         }
       } catch (err) {
         console.warn('Supabase updateUser exception:', err);

@@ -27,10 +27,80 @@ import {
 import { 
   supabase, 
   isSupabaseConfigured, 
-  signUpWithSupabaseAuth, 
-  toUserProfileRow, 
-  fromUserProfileRow 
+  signUpWithSupabaseAuth,
+  safeSupabaseUpsertUser,
+  generateUUID,
+  isValidUUID
 } from '../services/supabase';
+
+// Explicit database row interface matching the real Supabase schema (full_name)
+export interface SupabaseUserProfileRow {
+  id: string;
+  email: string;
+  full_name: string;
+  role: UserRole;
+  facility_id?: string | null;
+  facility_name?: string | null;
+  assigned_facility_ids?: string[];
+  job_role?: string;
+  department?: string;
+  contact_number?: string;
+  can_delete?: boolean;
+  allowed_modules?: AppModule[];
+  is_active?: boolean;
+  created_at?: string;
+  auth_user_id?: string;
+}
+
+// Bidirectional helper mappers between UI User model and Supabase user_profiles table
+export function toSupabaseUserRow(user: Partial<User>): Record<string, any> {
+  const row: Record<string, any> = {};
+  if (user.id !== undefined) {
+    if (isValidUUID(user.id)) {
+      row.id = user.id;
+    } else if (user.authUserId && isValidUUID(user.authUserId)) {
+      row.id = user.authUserId;
+    } else {
+      row.id = generateUUID();
+    }
+  }
+  if (user.authUserId !== undefined && user.authUserId && isValidUUID(user.authUserId)) {
+    row.auth_user_id = user.authUserId;
+  }
+  if (user.email !== undefined) row.email = user.email.toLowerCase().trim();
+  if (user.name !== undefined) row.full_name = user.name.trim();
+  if (user.role !== undefined) row.role = user.role;
+  if (user.facilityId !== undefined) row.facility_id = user.facilityId || null;
+  if (user.facilityName !== undefined) row.facility_name = user.facilityName || null;
+  if (user.assignedFacilityIds !== undefined) row.assigned_facility_ids = user.assignedFacilityIds;
+  if (user.jobRole !== undefined) row.job_role = user.jobRole;
+  if (user.department !== undefined) row.department = user.department;
+  if (user.contactNumber !== undefined) row.contact_number = user.contactNumber;
+  if (user.canDelete !== undefined) row.can_delete = user.canDelete;
+  if (user.allowedModules !== undefined) row.allowed_modules = user.allowedModules;
+  if (user.isActive !== undefined) row.is_active = user.isActive;
+  return row;
+}
+
+export function fromSupabaseUserRow(row: any): User {
+  return {
+    id: row.id,
+    email: row.email,
+    name: row.full_name || row.name || 'LECO Officer',
+    role: row.role,
+    facilityId: row.facility_id || row.facilityId,
+    facilityName: row.facility_name || row.facilityName,
+    assignedFacilityIds: row.assigned_facility_ids || row.assignedFacilityIds || [],
+    jobRole: row.job_role || row.jobRole,
+    department: row.department,
+    contactNumber: row.contact_number || row.contactNumber,
+    canDelete: Boolean(row.can_delete ?? row.canDelete),
+    allowedModules: row.allowed_modules || row.allowedModules || ['dashboard', 'scope1', 'scope2', 'scope3', 'reports', 'calculator'],
+    isActive: row.is_active !== undefined ? Boolean(row.is_active) : (row.isActive !== undefined ? Boolean(row.isActive) : true),
+    createdAt: row.created_at || row.createdAt || new Date().toISOString(),
+    authUserId: row.auth_user_id || row.authUserId
+  };
+}
 
 const ALL_MODULES: { id: AppModule; label: string; desc: string }[] = [
   { id: 'dashboard', label: 'Executive Dashboard', desc: 'Summary metrics & charts' },
@@ -83,44 +153,50 @@ export const UserManager: React.FC = () => {
   const [isActive, setIsActive] = useState(true);
 
   // ==========================================================================
-  // READ: Fetch users directly from Supabase user_profiles table
+  // READ: Fetch users directly from Supabase user_profiles using full_name
   // ==========================================================================
   const fetchUsers = async () => {
     setLoading(true);
     try {
       if (supabase) {
-        const { data, error } = await supabase
+        let { data, error } = await supabase
           .from('user_profiles')
           .select('*')
-          .order('name', { ascending: true });
+          .order('full_name', { ascending: true });
 
         if (error) {
-          console.error('Supabase fetch user_profiles error:', error);
-          notify(`Failed to fetch users from Supabase: ${error.message}`, 'error');
-          // Fallback to API if Supabase table query fails
+          // If order by full_name failed due to column discrepancies, retry simple select
+          const fallback = await supabase.from('user_profiles').select('*');
+          data = fallback.data;
+          error = fallback.error;
+        }
+
+        if (error) {
+          console.warn('Supabase fetch user_profiles notice:', error.message || error);
+          // Fallback to local cache gracefully if Supabase is offline or unreachable
           const fallbackData = await api.getUsers();
           setUsersList(fallbackData);
           return;
         }
 
         if (data && data.length > 0) {
-          setUsersList(data.map(fromUserProfileRow));
+          setUsersList(data.map(fromSupabaseUserRow));
           return;
         } else {
-          // If the Supabase table is completely empty, check if we need to seed the initial default users
+          // If the Supabase table is completely empty, seed initial default accounts
           const initialApiUsers = await api.getUsers();
           if (initialApiUsers && initialApiUsers.length > 0) {
             for (const u of initialApiUsers) {
               try {
-                const r = toUserProfileRow(u);
-                await supabase.from('user_profiles').insert([{ ...r, facility_id: null }]);
+                const r = toSupabaseUserRow(u);
+                await safeSupabaseUpsertUser('insert', { ...r, facility_id: null });
               } catch (seedErr) {
                 console.warn('Initial seed error:', seedErr);
               }
             }
-            const refreshed = await supabase.from('user_profiles').select('*').order('name', { ascending: true });
+            const refreshed = await supabase.from('user_profiles').select('*');
             if (refreshed.data && refreshed.data.length > 0) {
-              setUsersList(refreshed.data.map(fromUserProfileRow));
+              setUsersList(refreshed.data.map(fromSupabaseUserRow));
               return;
             }
           }
@@ -197,21 +273,31 @@ export const UserManager: React.FC = () => {
   };
 
   // ==========================================================================
-  // CREATE / UPDATE: Real Supabase CRUD operations
+  // CREATE / UPDATE: Real Supabase CRUD operations using full_name column
   // ==========================================================================
   const handleSaveUser = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!email.trim() || !name.trim()) {
-      notify('Email and full name are required', 'error');
+    const cleanEmail = email.trim().toLowerCase();
+    const cleanName = name.trim();
+
+    if (!cleanEmail || !cleanName) {
+      notify('Corporate email and full officer name are required', 'error');
       return;
+    }
+
+    if (!editingUser) {
+      const accessPassword = password?.trim() || 'Sadmin@cf369';
+      if (accessPassword.length < 6) {
+        notify('Initial password must be at least 6 characters for Supabase Authentication.', 'error');
+        return;
+      }
     }
 
     setIsSubmitting(true);
     const selectedFacObj = facilities.find(f => f.id === facilityId);
 
     const payload: Partial<User> = {
-      email: email.trim().toLowerCase(),
-      name: name.trim(),
+      email: cleanEmail,
+      name: cleanName,
       role,
       facilityId: role === 'super_admin' ? undefined : facilityId || undefined,
       facilityName: role === 'super_admin' ? undefined : selectedFacObj?.name,
@@ -229,106 +315,138 @@ export const UserManager: React.FC = () => {
     try {
       if (editingUser) {
         // --------------------------------------------------------------------
-        // UPDATE: Execute query against Supabase user_profiles table using ID
+        // UPDATE: Execute update query against Supabase user_profiles (full_name)
         // --------------------------------------------------------------------
         if (supabase) {
-          const row = toUserProfileRow(payload);
-          let { error: updateError } = await supabase
-            .from('user_profiles')
-            .update(row)
-            .eq('id', editingUser.id);
+          const row = toSupabaseUserRow(payload);
+          const result = await safeSupabaseUpsertUser('update', row, editingUser.id, editingUser.email);
 
-          // Foreign key fallback on facility_id if facility is not in DB facilities table
-          if (updateError && (updateError.code === '23503' || updateError.message?.includes('violates foreign key constraint'))) {
-            const safeRow = { ...row, facility_id: null };
-            const retry = await supabase.from('user_profiles').update(safeRow).eq('id', editingUser.id);
-            updateError = retry.error;
-          }
+          if (!result.success && result.error) {
+            const rawMsg = result.error?.message || String(result.error || '');
+            const isNetErr = result.isNetworkError ||
+              rawMsg.toLowerCase().includes('failed to fetch') ||
+              rawMsg.toLowerCase().includes('network') ||
+              rawMsg.toLowerCase().includes('fetch');
 
-          // If ID didn't match (e.g. initial seeded record), match by unique email
-          if (updateError || !editingUser.id) {
-            const emailRetry = await supabase
-              .from('user_profiles')
-              .update(row)
-              .eq('email', editingUser.email.toLowerCase().trim());
-            if (!emailRetry.error) {
-              updateError = null;
+            if (isNetErr) {
+              console.warn('[UserManager] Supabase update endpoint unreachable (Failed to fetch). Updating locally.');
+            } else {
+              console.error('Supabase update user_profile failed:', result.error);
+              notify(`Database update failed: ${result.error.message || result.error}`, 'error');
+              setIsSubmitting(false);
+              return;
             }
-          }
-
-          if (updateError) {
-            console.error('Supabase update user_profile failed:', updateError);
-            notify(`Database update failed: ${updateError.message}`, 'error');
-            setIsSubmitting(false);
-            return;
           }
         }
 
         // Synchronize in-memory cache/api
         await api.updateUser(editingUser.id, payload);
-        notify(`User profile for "${payload.name}" updated successfully in Supabase!`, 'success');
+        notify(`User profile for "${payload.name}" updated successfully!`, 'success');
       } else {
         // --------------------------------------------------------------------
-        // CREATE: Insert new user into Supabase user_profiles table
+        // CREATE: 1. Provision Supabase Auth User in auth.users
         // --------------------------------------------------------------------
-        const newUserId = `usr-${Date.now().toString(36)}`;
-        const newRecord: User = {
-          ...payload,
-          id: newUserId,
-          createdAt: new Date().toISOString()
-        } as User;
+        let authUserId: string | undefined = undefined;
 
-        // Register in Supabase Auth if configured
-        if (isSupabaseConfigured) {
+        if (isSupabaseConfigured && supabase) {
           try {
-            const authRes = await signUpWithSupabaseAuth(email.trim(), password || 'Sadmin@cf369', {
-              name: name.trim(),
+            const userPassword = password?.trim() || 'Sadmin@cf369';
+            const authRes = await signUpWithSupabaseAuth(cleanEmail, userPassword, {
+              name: cleanName,
+              full_name: cleanName,
               role,
-              facilityId
+              facility_id: facilityId || null,
+              facility_name: selectedFacObj?.name || null
             });
-            if (authRes?.user?.id) {
-              newRecord.authUserId = authRes.user.id;
+
+            if (authRes?.user?.id && isValidUUID(authRes.user.id)) {
+              authUserId = authRes.user.id;
             }
           } catch (sbAuthErr: any) {
-            console.warn('Supabase Auth user creation note:', sbAuthErr?.message || sbAuthErr);
+            console.warn('Supabase Auth user creation notice:', sbAuthErr);
+            const rawMsg = sbAuthErr?.message || String(sbAuthErr || '');
+            
+            // 1. Duplicate user registration
+            if (
+              rawMsg.toLowerCase().includes('already registered') ||
+              rawMsg.toLowerCase().includes('already exists') ||
+              sbAuthErr.code === 'user_already_exists' ||
+              sbAuthErr.status === 422
+            ) {
+              notify(`Authentication Error: A user with email "${cleanEmail}" is already registered in Supabase Authentication.`, 'error');
+              setIsSubmitting(false);
+              return;
+            } 
+            // 2. Password validation failure
+            else if (rawMsg.toLowerCase().includes('password')) {
+              notify(`Authentication Error: ${rawMsg}`, 'error');
+              setIsSubmitting(false);
+              return;
+            } 
+            // 3. Network or endpoint unreachable ("Failed to fetch")
+            else if (
+              sbAuthErr.isNetworkError ||
+              rawMsg.toLowerCase().includes('failed to fetch') ||
+              rawMsg.toLowerCase().includes('network') ||
+              rawMsg.toLowerCase().includes('fetch')
+            ) {
+              console.warn('[UserManager] Supabase Auth endpoint unreachable (Failed to fetch). Continuing with profile creation in database.');
+              notify('Supabase Auth endpoint is currently unreachable via network. Creating user profile in database and local cache.', 'info');
+              // Proceed without halting so the user profile is created
+            } 
+            // 4. Other Auth errors
+            else {
+              console.warn(`Supabase Auth issue: ${rawMsg}. Continuing with profile creation.`);
+              notify(`Supabase Auth Notice: ${rawMsg}. Profile created in database.`, 'info');
+            }
           }
         }
 
+        // --------------------------------------------------------------------
+        // CREATE: 2. Insert into public.user_profiles with auth_user_id link
+        // --------------------------------------------------------------------
+        const newUserId = authUserId || generateUUID();
+        const newRecord: User = {
+          ...payload,
+          id: newUserId,
+          authUserId: authUserId,
+          createdAt: new Date().toISOString()
+        } as User;
+
         if (supabase) {
-          const row = toUserProfileRow(newRecord);
-          let { error: insertError } = await supabase
-            .from('user_profiles')
-            .insert([row]);
+          const row = toSupabaseUserRow(newRecord);
+          const result = await safeSupabaseUpsertUser('insert', row);
 
-          // Handle foreign key constraint if facility_id is not yet in Supabase facilities table
-          if (insertError && (insertError.code === '23503' || insertError.message?.includes('violates foreign key constraint'))) {
-            console.warn('Retrying insert without foreign key constraint on facility_id');
-            const safeRow = { ...row, facility_id: null };
-            const retry = await supabase.from('user_profiles').insert([safeRow]);
-            insertError = retry.error;
+          if (!result.success && result.error) {
+            const rawMsg = result.error?.message || String(result.error || '');
+            const isNetErr = result.isNetworkError ||
+              rawMsg.toLowerCase().includes('failed to fetch') ||
+              rawMsg.toLowerCase().includes('network') ||
+              rawMsg.toLowerCase().includes('fetch');
+
+            if (isNetErr) {
+              console.warn('[UserManager] Supabase user_profile insert endpoint unreachable (Failed to fetch). Saving in local database.');
+            } else {
+              console.error('Supabase user_profile insert failed:', result.error);
+              notify(`Database profile insert failed: ${result.error.message || result.error}`, 'error');
+              setIsSubmitting(false);
+              return;
+            }
           }
-
-          // Handle duplicate email case by updating existing profile
-          if (insertError && (insertError.code === '23505' || insertError.message?.includes('duplicate key'))) {
-            console.warn('Email already exists, updating profile instead');
-            const updateRes = await supabase.from('user_profiles').update(row).eq('email', row.email);
-            insertError = updateRes.error;
+          if (result.data?.id) {
+            newRecord.id = result.data.id;
           }
-
-          if (insertError) {
-            console.error('Supabase user insert failed:', insertError);
-            notify(`Database insert failed: ${insertError.message}`, 'error');
-            setIsSubmitting(false);
-            return;
+          if (result.data?.auth_user_id) {
+            newRecord.authUserId = result.data.auth_user_id;
           }
         }
 
         // Synchronize in-memory cache/api
         await api.createUser(newRecord);
-        notify(`Officer user account "${payload.name}" created and saved to Supabase!`, 'success');
+        notify(`Officer user account "${payload.name}" created successfully!`, 'success');
       }
 
-      // Only close modal and refresh state AFTER successful Supabase operation
+      // Only close modal and refresh state AFTER successful operation
       setIsModalOpen(false);
       await fetchUsers();
       await refreshUsers();
@@ -367,17 +485,23 @@ export const UserManager: React.FC = () => {
         }
 
         if (deleteError) {
-          console.error('Supabase delete user failed:', deleteError);
-          notify(`Failed to delete user in Supabase: ${deleteError.message}`, 'error');
-          return;
+          const rawMsg = deleteError.message || String(deleteError);
+          const isNetErr = rawMsg.toLowerCase().includes('failed to fetch') || rawMsg.toLowerCase().includes('network');
+          if (isNetErr) {
+            console.warn('Supabase delete user notice (Failed to fetch). Deleting from local store.');
+          } else {
+            console.error('Supabase delete user failed:', deleteError);
+            notify(`Failed to delete user in Supabase: ${deleteError.message}`, 'error');
+            return;
+          }
         }
       }
 
       await api.deleteUser(id);
-      notify('User account deactivated and deleted from Supabase.', 'success');
+      notify('User account deactivated and deleted.', 'success');
       setDeleteConfirmId(null);
 
-      // Refresh UI state directly from Supabase
+      // Refresh UI state directly
       await fetchUsers();
       await refreshUsers();
     } catch (err: any) {
@@ -506,9 +630,17 @@ export const UserManager: React.FC = () => {
                                 </span>
                               )}
                             </div>
-                            <div className="text-[11px] text-slate-400 font-mono flex items-center gap-1">
-                              <Mail className="w-3 h-3 text-slate-400 inline" />
-                              <span>{u.email}</span>
+                            <div className="text-[11px] text-slate-400 font-mono flex items-center gap-1.5 flex-wrap">
+                              <span className="flex items-center gap-1">
+                                <Mail className="w-3 h-3 text-slate-400 inline" />
+                                <span>{u.email}</span>
+                              </span>
+                              {u.authUserId && (
+                                <span className="inline-flex items-center gap-1 text-[9px] font-sans font-medium text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.2 rounded-full" title={`Supabase Auth UID: ${u.authUserId}`}>
+                                  <Key className="w-2.5 h-2.5 text-emerald-600" />
+                                  Auth Linked
+                                </span>
+                              )}
                             </div>
                           </div>
                         </div>
@@ -721,17 +853,26 @@ export const UserManager: React.FC = () => {
               </div>
 
               {!editingUser && (
-                <div>
-                  <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">
-                    Initial Access Password
-                  </label>
+                <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200">
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block font-bold text-slate-700 uppercase tracking-wider text-[11px]">
+                      Initial Access Password (Supabase Auth)
+                    </label>
+                    <span className="text-[10px] text-emerald-700 bg-emerald-100 font-semibold px-2 py-0.5 rounded-full">
+                      Supabase Auth Table
+                    </span>
+                  </div>
                   <input
                     type="password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    placeholder="Default: Sadmin@cf369"
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    placeholder="Default: Sadmin@cf369 (min. 6 chars)"
+                    minLength={6}
+                    className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   />
+                  <p className="text-[11px] text-slate-500 mt-1">
+                    Creates an authentication identity in Supabase Auth (<code className="font-mono text-slate-700">auth.users</code>) and binds the resulting UID to <code className="font-mono text-slate-700">user_profiles.auth_user_id</code>.
+                  </p>
                 </div>
               )}
 
