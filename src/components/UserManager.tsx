@@ -64,6 +64,7 @@ export const UserManager: React.FC = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Form Fields
   const [email, setEmail] = useState('');
@@ -81,53 +82,59 @@ export const UserManager: React.FC = () => {
   ]);
   const [isActive, setIsActive] = useState(true);
 
+  // ==========================================================================
+  // READ: Fetch users directly from Supabase user_profiles table
+  // ==========================================================================
   const fetchUsers = async () => {
     setLoading(true);
     try {
       if (supabase) {
-        try {
-          const { data, error } = await supabase
-            .from('user_profiles')
-            .select('*')
-            .order('name', { ascending: true });
+        const { data, error } = await supabase
+          .from('user_profiles')
+          .select('*')
+          .order('name', { ascending: true });
 
-          if (!error && data !== null) {
-            if (data.length > 0) {
-              setUsersList(data.map(fromUserProfileRow));
-              setLoading(false);
-              return;
-            } else {
-              // Table exists and is empty in Supabase, load and seed default accounts
-              const apiUsers = await api.getUsers();
-              if (apiUsers && apiUsers.length > 0) {
-                for (const u of apiUsers) {
-                  try {
-                    const r = toUserProfileRow(u);
-                    await supabase.from('user_profiles').insert([{ ...r, facility_id: null }]);
-                  } catch (e) {
-                    // ignore initial seed error
-                  }
-                }
-                const refreshed = await supabase.from('user_profiles').select('*').order('name', { ascending: true });
-                if (refreshed.data && refreshed.data.length > 0) {
-                  setUsersList(refreshed.data.map(fromUserProfileRow));
-                  setLoading(false);
-                  return;
-                }
+        if (error) {
+          console.error('Supabase fetch user_profiles error:', error);
+          notify(`Failed to fetch users from Supabase: ${error.message}`, 'error');
+          // Fallback to API if Supabase table query fails
+          const fallbackData = await api.getUsers();
+          setUsersList(fallbackData);
+          return;
+        }
+
+        if (data && data.length > 0) {
+          setUsersList(data.map(fromUserProfileRow));
+          return;
+        } else {
+          // If the Supabase table is completely empty, check if we need to seed the initial default users
+          const initialApiUsers = await api.getUsers();
+          if (initialApiUsers && initialApiUsers.length > 0) {
+            for (const u of initialApiUsers) {
+              try {
+                const r = toUserProfileRow(u);
+                await supabase.from('user_profiles').insert([{ ...r, facility_id: null }]);
+              } catch (seedErr) {
+                console.warn('Initial seed error:', seedErr);
               }
-              setUsersList([]);
-              setLoading(false);
+            }
+            const refreshed = await supabase.from('user_profiles').select('*').order('name', { ascending: true });
+            if (refreshed.data && refreshed.data.length > 0) {
+              setUsersList(refreshed.data.map(fromUserProfileRow));
               return;
             }
           }
-        } catch (sbErr) {
-          console.warn('Supabase fetch user_profiles notice:', sbErr);
+          setUsersList([]);
+          return;
         }
       }
+
+      // Fallback when Supabase client is not configured
       const data = await api.getUsers();
       setUsersList(data);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error fetching users:', err);
+      notify(err.message || 'Failed to load users', 'error');
     } finally {
       setLoading(false);
     }
@@ -189,6 +196,9 @@ export const UserManager: React.FC = () => {
     }
   };
 
+  // ==========================================================================
+  // CREATE / UPDATE: Real Supabase CRUD operations
+  // ==========================================================================
   const handleSaveUser = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email.trim() || !name.trim()) {
@@ -196,6 +206,7 @@ export const UserManager: React.FC = () => {
       return;
     }
 
+    setIsSubmitting(true);
     const selectedFacObj = facilities.find(f => f.id === facilityId);
 
     const payload: Partial<User> = {
@@ -217,39 +228,49 @@ export const UserManager: React.FC = () => {
 
     try {
       if (editingUser) {
-        // Execute Supabase update directly to user_profiles table
+        // --------------------------------------------------------------------
+        // UPDATE: Execute query against Supabase user_profiles table using ID
+        // --------------------------------------------------------------------
         if (supabase) {
-          try {
-            const row = toUserProfileRow(payload);
-            let { error: sbErr } = await supabase
+          const row = toUserProfileRow(payload);
+          let { error: updateError } = await supabase
+            .from('user_profiles')
+            .update(row)
+            .eq('id', editingUser.id);
+
+          // Foreign key fallback on facility_id if facility is not in DB facilities table
+          if (updateError && (updateError.code === '23503' || updateError.message?.includes('violates foreign key constraint'))) {
+            const safeRow = { ...row, facility_id: null };
+            const retry = await supabase.from('user_profiles').update(safeRow).eq('id', editingUser.id);
+            updateError = retry.error;
+          }
+
+          // If ID didn't match (e.g. initial seeded record), match by unique email
+          if (updateError || !editingUser.id) {
+            const emailRetry = await supabase
               .from('user_profiles')
               .update(row)
-              .eq('id', editingUser.id);
-
-            // Foreign key fallback on facility_id if facility isn't in DB
-            if (sbErr && (sbErr.code === '23503' || sbErr.message?.includes('violates foreign key constraint'))) {
-              const safeRow = { ...row, facility_id: null };
-              const retry = await supabase.from('user_profiles').update(safeRow).eq('id', editingUser.id);
-              sbErr = retry.error;
+              .eq('email', editingUser.email.toLowerCase().trim());
+            if (!emailRetry.error) {
+              updateError = null;
             }
+          }
 
-            // Also match by email if id was different
-            if (editingUser.email) {
-              await supabase
-                .from('user_profiles')
-                .update(row)
-                .eq('email', editingUser.email.toLowerCase().trim());
-            }
-
-            if (sbErr) console.warn('Supabase user update notice:', sbErr);
-          } catch (e) {
-            console.warn('Supabase user update error:', e);
+          if (updateError) {
+            console.error('Supabase update user_profile failed:', updateError);
+            notify(`Database update failed: ${updateError.message}`, 'error');
+            setIsSubmitting(false);
+            return;
           }
         }
 
+        // Synchronize in-memory cache/api
         await api.updateUser(editingUser.id, payload);
-        notify(`User profile for "${payload.name}" updated successfully!`, 'success');
+        notify(`User profile for "${payload.name}" updated successfully in Supabase!`, 'success');
       } else {
+        // --------------------------------------------------------------------
+        // CREATE: Insert new user into Supabase user_profiles table
+        // --------------------------------------------------------------------
         const newUserId = `usr-${Date.now().toString(36)}`;
         const newRecord: User = {
           ...payload,
@@ -257,7 +278,7 @@ export const UserManager: React.FC = () => {
           createdAt: new Date().toISOString()
         } as User;
 
-        // If Supabase Auth is configured, register Supabase Auth credentials & get auth UID
+        // Register in Supabase Auth if configured
         if (isSupabaseConfigured) {
           try {
             const authRes = await signUpWithSupabaseAuth(email.trim(), password || 'Sadmin@cf369', {
@@ -268,90 +289,99 @@ export const UserManager: React.FC = () => {
             if (authRes?.user?.id) {
               newRecord.authUserId = authRes.user.id;
             }
-          } catch (sbErr: any) {
-            console.warn('Supabase Auth user creation note:', sbErr?.message || sbErr);
+          } catch (sbAuthErr: any) {
+            console.warn('Supabase Auth user creation note:', sbAuthErr?.message || sbAuthErr);
           }
         }
 
-        // Direct Supabase Insertion Query into user_profiles table
         if (supabase) {
-          try {
-            const row = toUserProfileRow(newRecord);
-            let { error: insertErr } = await supabase
-              .from('user_profiles')
-              .insert([row]);
+          const row = toUserProfileRow(newRecord);
+          let { error: insertError } = await supabase
+            .from('user_profiles')
+            .insert([row]);
 
-            // If foreign key constraint failed on facility_id, retry with facility_id = null
-            if (insertErr && (insertErr.code === '23503' || insertErr.message?.includes('violates foreign key constraint'))) {
-              console.warn('Foreign key notice for facility_id, retrying insert with facility_id = null');
-              const safeRow = { ...row, facility_id: null };
-              const retry = await supabase.from('user_profiles').insert([safeRow]);
-              insertErr = retry.error;
-            }
+          // Handle foreign key constraint if facility_id is not yet in Supabase facilities table
+          if (insertError && (insertError.code === '23503' || insertError.message?.includes('violates foreign key constraint'))) {
+            console.warn('Retrying insert without foreign key constraint on facility_id');
+            const safeRow = { ...row, facility_id: null };
+            const retry = await supabase.from('user_profiles').insert([safeRow]);
+            insertError = retry.error;
+          }
 
-            // If email already exists in user_profiles, update existing record
-            if (insertErr && (insertErr.code === '23505' || insertErr.message?.includes('duplicate key'))) {
-              console.warn('User already exists in Supabase, updating record by email:', row.email);
-              const updateRes = await supabase.from('user_profiles').update(row).eq('email', row.email);
-              insertErr = updateRes.error;
-            }
+          // Handle duplicate email case by updating existing profile
+          if (insertError && (insertError.code === '23505' || insertError.message?.includes('duplicate key'))) {
+            console.warn('Email already exists, updating profile instead');
+            const updateRes = await supabase.from('user_profiles').update(row).eq('email', row.email);
+            insertError = updateRes.error;
+          }
 
-            if (insertErr) {
-              console.error('Supabase user insert error:', insertErr);
-              notify(`Database notice: ${insertErr.message}`, 'warning');
-            } else {
-              console.log('Successfully inserted new user into Supabase user_profiles:', newRecord.email);
-            }
-          } catch (e) {
-            console.warn('Supabase user insert error:', e);
+          if (insertError) {
+            console.error('Supabase user insert failed:', insertError);
+            notify(`Database insert failed: ${insertError.message}`, 'error');
+            setIsSubmitting(false);
+            return;
           }
         }
 
+        // Synchronize in-memory cache/api
         await api.createUser(newRecord);
-        notify(`Officer user account "${payload.name}" created successfully!`, 'success');
+        notify(`Officer user account "${payload.name}" created and saved to Supabase!`, 'success');
       }
+
+      // Only close modal and refresh state AFTER successful Supabase operation
       setIsModalOpen(false);
       await fetchUsers();
       await refreshUsers();
     } catch (err: any) {
+      console.error('handleSaveUser error:', err);
       notify(err.message || 'Failed to save user account', 'error');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
+  // ==========================================================================
+  // DELETE: Real Supabase deletion query using record ID
+  // ==========================================================================
   const handleDeleteUser = async (id: string) => {
-    if (!canDelete) {
+    if (!canDelete || !isSuperAdmin) {
       notify('You do not have administrative permission to delete users.', 'error');
       return;
     }
+
     try {
       const targetUser = usersList.find(u => u.id === id);
 
       if (supabase) {
-        try {
-          const { error: sbErr } = await supabase
+        let { error: deleteError } = await supabase
+          .from('user_profiles')
+          .delete()
+          .eq('id', id);
+
+        // Also ensure deleted by email if id differed
+        if (targetUser?.email) {
+          await supabase
             .from('user_profiles')
             .delete()
-            .eq('id', id);
+            .eq('email', targetUser.email.toLowerCase().trim());
+        }
 
-          if (targetUser?.email) {
-            await supabase
-              .from('user_profiles')
-              .delete()
-              .eq('email', targetUser.email.toLowerCase().trim());
-          }
-
-          if (sbErr) console.warn('Supabase user delete notice:', sbErr);
-        } catch (e) {
-          console.warn('Supabase user delete error:', e);
+        if (deleteError) {
+          console.error('Supabase delete user failed:', deleteError);
+          notify(`Failed to delete user in Supabase: ${deleteError.message}`, 'error');
+          return;
         }
       }
 
       await api.deleteUser(id);
-      notify('User account deactivated and removed.', 'success');
+      notify('User account deactivated and deleted from Supabase.', 'success');
       setDeleteConfirmId(null);
+
+      // Refresh UI state directly from Supabase
       await fetchUsers();
       await refreshUsers();
     } catch (err: any) {
+      console.error('handleDeleteUser error:', err);
       notify(err.message || 'Failed to delete user', 'error');
     }
   };
@@ -439,145 +469,162 @@ export const UserManager: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-slate-700">
-              {filteredUsers.map((u) => {
-                const isRootSuper = u.email.toLowerCase() === 'superadmincf@leco.com';
+              {loading ? (
+                <tr>
+                  <td colSpan={7} className="py-12 text-center text-slate-400">
+                    <div className="flex flex-col items-center justify-center gap-2">
+                      <div className="w-6 h-6 border-2 border-emerald-600 border-t-transparent rounded-full animate-spin"></div>
+                      <span>Connecting and fetching users from database...</span>
+                    </div>
+                  </td>
+                </tr>
+              ) : filteredUsers.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="py-12 text-center text-slate-400">
+                    No officer accounts found matching your query.
+                  </td>
+                </tr>
+              ) : (
+                filteredUsers.map((u) => {
+                  const isRootSuper = u.email.toLowerCase() === 'superadmincf@leco.com';
 
-                return (
-                  <tr key={u.id} className="hover:bg-slate-50/80 transition">
-                    
-                    {/* User Info */}
-                    <td className="py-3.5 px-4">
-                      <div className="flex items-center gap-3">
-                        <div className="w-8 h-8 rounded-xl bg-slate-800 text-white flex items-center justify-center font-bold text-xs shrink-0">
-                          {u.name.charAt(0).toUpperCase()}
+                  return (
+                    <tr key={u.id} className="hover:bg-slate-50/80 transition">
+                      
+                      {/* User Info */}
+                      <td className="py-3.5 px-4">
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-xl bg-slate-800 text-white flex items-center justify-center font-bold text-xs shrink-0">
+                            {u.name.charAt(0).toUpperCase()}
+                          </div>
+                          <div>
+                            <div className="font-bold text-slate-900 flex items-center gap-1.5">
+                              <span>{u.name}</span>
+                              {isRootSuper && (
+                                <span className="text-[10px] bg-emerald-100 text-emerald-800 px-1.5 py-0.2 rounded font-bold">
+                                  Root
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[11px] text-slate-400 font-mono flex items-center gap-1">
+                              <Mail className="w-3 h-3 text-slate-400 inline" />
+                              <span>{u.email}</span>
+                            </div>
+                          </div>
                         </div>
-                        <div>
-                          <div className="font-bold text-slate-900 flex items-center gap-1.5">
-                            <span>{u.name}</span>
-                            {isRootSuper && (
-                              <span className="text-[10px] bg-emerald-100 text-emerald-800 px-1.5 py-0.2 rounded font-bold">
-                                Root
-                              </span>
+                      </td>
+
+                      {/* Role */}
+                      <td className="py-3.5 px-4">
+                        <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold ${
+                          u.role === 'super_admin' ? 'bg-emerald-100 text-emerald-800' :
+                          u.role === 'branch_admin' ? 'bg-blue-100 text-blue-800' :
+                          'bg-amber-100 text-amber-800'
+                        }`}>
+                          {u.role === 'super_admin' && <ShieldCheck className="w-3.5 h-3.5" />}
+                          {u.role === 'branch_admin' && <Building2 className="w-3.5 h-3.5" />}
+                          {u.role === 'facility_user' && <UserCheck className="w-3.5 h-3.5" />}
+                          {u.role === 'super_admin' ? 'Super Admin' : u.role === 'branch_admin' ? 'Branch Admin' : 'Facility User'}
+                        </span>
+                        {u.jobRole && (
+                          <div className="text-[10px] text-slate-500 mt-1 font-medium">
+                            {u.jobRole}
+                          </div>
+                        )}
+                      </td>
+
+                      {/* Facility */}
+                      <td className="py-3.5 px-4">
+                        {u.role === 'super_admin' ? (
+                          <span className="text-emerald-700 font-bold flex items-center gap-1">
+                            <Layers className="w-3 h-3" />
+                            Global LECO Scope (All Facilities)
+                          </span>
+                        ) : (
+                          <div>
+                            <div className="font-semibold text-slate-800 flex items-center gap-1">
+                              <Building2 className="w-3 h-3 text-slate-400" />
+                              <span>{u.facilityName || 'Assigned Branch'}</span>
+                            </div>
+                            {u.assignedFacilityIds && u.assignedFacilityIds.length > 1 && (
+                              <div className="text-[10px] text-blue-600 font-medium">
+                                +{u.assignedFacilityIds.length - 1} subordinate CSCs
+                              </div>
                             )}
                           </div>
-                          <div className="text-[11px] text-slate-400 font-mono flex items-center gap-1">
-                            <Mail className="w-3 h-3 text-slate-400 inline" />
-                            <span>{u.email}</span>
-                          </div>
-                        </div>
-                      </div>
-                    </td>
+                        )}
+                      </td>
 
-                    {/* Role */}
-                    <td className="py-3.5 px-4">
-                      <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold ${
-                        u.role === 'super_admin' ? 'bg-emerald-100 text-emerald-800' :
-                        u.role === 'branch_admin' ? 'bg-blue-100 text-blue-800' :
-                        'bg-amber-100 text-amber-800'
-                      }`}>
-                        {u.role === 'super_admin' && <ShieldCheck className="w-3.5 h-3.5" />}
-                        {u.role === 'branch_admin' && <Building2 className="w-3.5 h-3.5" />}
-                        {u.role === 'facility_user' && <UserCheck className="w-3.5 h-3.5" />}
-                        {u.role === 'super_admin' ? 'Super Admin' : u.role === 'branch_admin' ? 'Branch Admin' : 'Facility User'}
-                      </span>
-                      {u.jobRole && (
-                        <div className="text-[10px] text-slate-500 mt-1 font-medium">
-                          {u.jobRole}
-                        </div>
-                      )}
-                    </td>
+                      {/* Granular Delete Rights */}
+                      <td className="py-3.5 px-4">
+                        {u.canDelete || u.role === 'super_admin' ? (
+                          <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                            <Check className="w-3 h-3 text-emerald-600" />
+                            Delete Enabled
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-md">
+                            <Lock className="w-3 h-3 text-slate-400" />
+                            Read/Edit Only
+                          </span>
+                        )}
+                      </td>
 
-                    {/* Facility */}
-                    <td className="py-3.5 px-4">
-                      {u.role === 'super_admin' ? (
-                        <span className="text-emerald-700 font-bold flex items-center gap-1">
-                          <Layers className="w-3 h-3" />
-                          Global LECO Scope (All Facilities)
-                        </span>
-                      ) : (
-                        <div>
-                          <div className="font-semibold text-slate-800 flex items-center gap-1">
-                            <Building2 className="w-3 h-3 text-slate-400" />
-                            <span>{u.facilityName || 'Assigned Branch'}</span>
-                          </div>
-                          {u.assignedFacilityIds && u.assignedFacilityIds.length > 1 && (
-                            <div className="text-[10px] text-blue-600 font-medium">
-                              +{u.assignedFacilityIds.length - 1} subordinate CSCs
-                            </div>
+                      {/* Allowed Modules */}
+                      <td className="py-3.5 px-4">
+                        <div className="flex flex-wrap gap-1 max-w-xs">
+                          {(u.allowedModules || []).slice(0, 3).map(m => (
+                            <span key={m} className="text-[9px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-mono">
+                              {m}
+                            </span>
+                          ))}
+                          {(u.allowedModules || []).length > 3 && (
+                            <span className="text-[9px] text-slate-400 font-medium">
+                              +{(u.allowedModules || []).length - 3}
+                            </span>
                           )}
                         </div>
-                      )}
-                    </td>
+                      </td>
 
-                    {/* Granular Delete Rights */}
-                    <td className="py-3.5 px-4">
-                      {u.canDelete || u.role === 'super_admin' ? (
-                        <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
-                          <Check className="w-3 h-3 text-emerald-600" />
-                          Delete Enabled
+                      {/* Status */}
+                      <td className="py-3.5 px-4">
+                        <span className={`inline-block w-2 h-2 rounded-full mr-1.5 ${
+                          u.isActive ? 'bg-emerald-500' : 'bg-slate-300'
+                        }`} />
+                        <span className="font-semibold text-slate-700">
+                          {u.isActive ? 'Active' : 'Deactivated'}
                         </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-md">
-                          <Lock className="w-3 h-3 text-slate-400" />
-                          Read/Edit Only
-                        </span>
-                      )}
-                    </td>
+                      </td>
 
-                    {/* Allowed Modules */}
-                    <td className="py-3.5 px-4">
-                      <div className="flex flex-wrap gap-1 max-w-xs">
-                        {(u.allowedModules || []).slice(0, 3).map(m => (
-                          <span key={m} className="text-[9px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-mono">
-                            {m}
-                          </span>
-                        ))}
-                        {(u.allowedModules || []).length > 3 && (
-                          <span className="text-[9px] text-slate-400 font-medium">
-                            +{(u.allowedModules || []).length - 3}
-                          </span>
-                        )}
-                      </div>
-                    </td>
+                      {/* Actions */}
+                      <td className="py-3.5 px-4 text-right">
+                        <div className="flex items-center justify-end gap-1.5">
+                          {isSuperAdmin && (
+                            <button
+                              onClick={() => openEditModal(u)}
+                              className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition cursor-pointer"
+                              title="Edit User Permissions"
+                            >
+                              <Edit3 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
 
-                    {/* Status */}
-                    <td className="py-3.5 px-4">
-                      <span className={`inline-block w-2 h-2 rounded-full mr-1.5 ${
-                        u.isActive ? 'bg-emerald-500' : 'bg-slate-300'
-                      }`} />
-                      <span className="font-semibold text-slate-700">
-                        {u.isActive ? 'Active' : 'Deactivated'}
-                      </span>
-                    </td>
+                          {canDelete && isSuperAdmin && !isRootSuper && (
+                            <button
+                              onClick={() => setDeleteConfirmId(u.id)}
+                              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition cursor-pointer"
+                              title="Deactivate / Delete User"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      </td>
 
-                    {/* Actions */}
-                    <td className="py-3.5 px-4 text-right">
-                      <div className="flex items-center justify-end gap-1.5">
-                        {isSuperAdmin && (
-                          <button
-                            onClick={() => openEditModal(u)}
-                            className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition cursor-pointer"
-                            title="Edit User Permissions"
-                          >
-                            <Edit3 className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-
-                        {canDelete && isSuperAdmin && !isRootSuper && (
-                          <button
-                            onClick={() => setDeleteConfirmId(u.id)}
-                            className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition cursor-pointer"
-                            title="Deactivate / Delete User"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-                      </div>
-                    </td>
-
-                  </tr>
-                );
-              })}
+                    </tr>
+                  );
+                })
+              )}
             </tbody>
           </table>
         </div>
@@ -592,7 +639,7 @@ export const UserManager: React.FC = () => {
             </div>
             <h3 className="text-base font-bold text-slate-900">Deactivate User Account</h3>
             <p className="text-xs text-slate-500 mt-2">
-              Are you sure you want to revoke this user's system access? Their historical logs will remain attributed in the audit trail.
+              Are you sure you want to revoke this user's system access and remove their profile from Supabase? Their historical logs will remain attributed in the audit trail.
             </p>
             <div className="mt-5 flex items-center justify-center gap-3">
               <button
@@ -863,16 +910,19 @@ export const UserManager: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setIsModalOpen(false)}
-                className="px-4 py-2 bg-white hover:bg-slate-200 text-slate-700 font-semibold rounded-xl border border-slate-300 transition cursor-pointer"
+                disabled={isSubmitting}
+                className="px-4 py-2 bg-white hover:bg-slate-200 text-slate-700 font-semibold rounded-xl border border-slate-300 transition cursor-pointer disabled:opacity-50"
               >
                 Cancel
               </button>
               <button
                 type="submit"
                 form="user-form"
-                className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl shadow transition cursor-pointer"
+                disabled={isSubmitting}
+                className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl shadow transition cursor-pointer disabled:opacity-50 flex items-center gap-2"
               >
-                {editingUser ? 'Save User Profile' : 'Provision Account'}
+                {isSubmitting && <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>}
+                <span>{editingUser ? 'Save User Profile' : 'Provision Account'}</span>
               </button>
             </div>
 
