@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { 
   Zap, 
@@ -6,6 +6,7 @@ import {
   Calendar, 
   LogOut, 
   ShieldCheck, 
+  Lock,
   User as UserIcon, 
   ChevronDown,
   Layers,
@@ -26,12 +27,27 @@ export const HeaderNavbar: React.FC = () => {
     setSelectedYear,
     isSuperAdmin,
     isBranchAdmin,
+    isFacilityUser,
     getScopedFacilities
   } = useAuth();
 
   const scopedFacilities = getScopedFacilities();
 
-  // Group facilities into Branches and their child CSCs for clean selection
+  // Keep selectedFacilityId within valid RBAC boundary
+  useEffect(() => {
+    if (isFacilityUser && user?.facilityId) {
+      if (selectedFacilityId !== user.facilityId) {
+        setSelectedFacilityId(user.facilityId);
+      }
+    } else if (isBranchAdmin && scopedFacilities.length > 0) {
+      const isCurrentlyValid = scopedFacilities.some(f => f.id === selectedFacilityId);
+      if (!isCurrentlyValid) {
+        setSelectedFacilityId(scopedFacilities[0].id);
+      }
+    }
+  }, [user?.role, user?.facilityId, isFacilityUser, isBranchAdmin, scopedFacilities, selectedFacilityId, setSelectedFacilityId]);
+
+  // Group scoped facilities into Branches and child CSCs for clean selection
   const parentBranches = scopedFacilities.filter(f => f.type === 'Branch' || f.isParent);
   const standaloneFacilities = scopedFacilities.filter(f => !f.parentId && f.type !== 'Branch' && !f.isParent);
 
@@ -60,50 +76,78 @@ export const HeaderNavbar: React.FC = () => {
 
           {/* Center: Global Scope Selectors (Facility & Year) */}
           <div className="hidden md:flex items-center gap-3">
-            {/* Facility Filter */}
+            {/* Facility Filter based on RBAC */}
             <div className="flex items-center bg-slate-800/80 border border-slate-700/80 rounded-xl px-3 py-1.5 shadow-sm">
-              <Building2 className="w-4 h-4 text-emerald-400 mr-2 shrink-0" />
+              <Building2 className={`w-4 h-4 mr-2 shrink-0 ${isSuperAdmin ? 'text-emerald-400' : isBranchAdmin ? 'text-blue-400' : 'text-amber-400'}`} />
+              
               <div className="flex flex-col">
-                <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider">Facility Scope</span>
-                <select
-                  value={selectedFacilityId}
-                  onChange={(e) => setSelectedFacilityId(e.target.value)}
-                  className="bg-transparent text-xs font-semibold text-slate-100 focus:outline-none cursor-pointer pr-4"
-                >
-                  {isSuperAdmin && (
-                    <option value="ALL" className="bg-slate-900 text-white">
-                      🏢 ALL LECO Facilities (Corporate Global)
-                    </option>
-                  )}
+                <div className="flex items-center gap-1">
+                  <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider">
+                    {isFacilityUser ? 'Assigned Facility' : isBranchAdmin ? 'Branch Admin Scope' : 'Facility Scope'}
+                  </span>
+                  {isFacilityUser && <Lock className="w-2.5 h-2.5 text-amber-400 shrink-0" />}
+                </div>
 
-                  {/* Branches & their CSCs */}
-                  {parentBranches.map(branch => {
-                    const children = scopedFacilities.filter(f => f.parentId === branch.id);
-                    return (
-                      <optgroup key={branch.id} label={`📍 ${branch.name}`} className="bg-slate-900 text-slate-200 font-bold">
-                        <option value={branch.id} className="bg-slate-900 text-white font-semibold pl-4">
-                          ↳ {branch.name} (Parent Branch & All CSCs)
-                        </option>
-                        {children.map(child => (
-                          <option key={child.id} value={child.id} className="bg-slate-900 text-slate-300 pl-6">
-                            &nbsp;&nbsp;&bull; {child.name}
+                {isFacilityUser ? (
+                  // Facility User: Locked to their single facility_id (no dropdown/locked view)
+                  <div className="text-xs font-bold text-slate-200 truncate max-w-[200px]" title={facilities.find(f => f.id === user?.facilityId)?.name || user?.facilityName || 'Assigned Facility'}>
+                    {facilities.find(f => f.id === user?.facilityId)?.name || user?.facilityName || 'Assigned CSC'}
+                  </div>
+                ) : (
+                  // Super Admin or Branch Admin: Scoped Dropdown
+                  <select
+                    value={selectedFacilityId}
+                    onChange={(e) => setSelectedFacilityId(e.target.value)}
+                    className="bg-transparent text-xs font-semibold text-slate-100 focus:outline-none cursor-pointer pr-4 max-w-[240px] truncate"
+                  >
+                    {isSuperAdmin && (
+                      <option value="ALL" className="bg-slate-900 text-white font-bold">
+                        🏢 ALL LECO Facilities (Corporate Global)
+                      </option>
+                    )}
+
+                    {/* Branches & their assigned CSCs */}
+                    {parentBranches.map(branch => {
+                      const children = scopedFacilities.filter(f => f.parentId === branch.id);
+                      return (
+                        <optgroup key={branch.id} label={`📍 ${branch.name}`} className="bg-slate-900 text-slate-200 font-bold">
+                          <option value={branch.id} className="bg-slate-900 text-white font-semibold pl-4">
+                            ↳ {branch.name} {children.length > 0 ? '(Branch & CSCs)' : '(Parent Branch)'}
+                          </option>
+                          {children.map(child => (
+                            <option key={child.id} value={child.id} className="bg-slate-900 text-slate-300 pl-6">
+                              &nbsp;&nbsp;&bull; {child.name}
+                            </option>
+                          ))}
+                        </optgroup>
+                      );
+                    })}
+
+                    {/* Scoped Child CSCs whose parent branch is not explicitly in scoped list */}
+                    {scopedFacilities.filter(f => f.parentId && !parentBranches.some(p => p.id === f.parentId)).length > 0 && (
+                      <optgroup label="🏢 Assigned CSC Units" className="bg-slate-900 text-slate-200 font-bold">
+                        {scopedFacilities
+                          .filter(f => f.parentId && !parentBranches.some(p => p.id === f.parentId))
+                          .map(fac => (
+                            <option key={fac.id} value={fac.id} className="bg-slate-900 text-white">
+                              &bull; {fac.name} ({fac.parentName || 'CSC'})
+                            </option>
+                          ))}
+                      </optgroup>
+                    )}
+
+                    {/* Standalone facilities */}
+                    {standaloneFacilities.length > 0 && (
+                      <optgroup label="🏭 Specialised Facilities & Depots" className="bg-slate-900 text-slate-200 font-bold">
+                        {standaloneFacilities.map(fac => (
+                          <option key={fac.id} value={fac.id} className="bg-slate-900 text-white">
+                            &bull; {fac.name} ({fac.type})
                           </option>
                         ))}
                       </optgroup>
-                    );
-                  })}
-
-                  {/* Standalone facilities */}
-                  {standaloneFacilities.length > 0 && (
-                    <optgroup label="🏭 Specialised Facilities & Depots" className="bg-slate-900 text-slate-200 font-bold">
-                      {standaloneFacilities.map(fac => (
-                        <option key={fac.id} value={fac.id} className="bg-slate-900 text-white">
-                          &bull; {fac.name} ({fac.type})
-                        </option>
-                      ))}
-                    </optgroup>
-                  )}
-                </select>
+                    )}
+                  </select>
+                )}
               </div>
             </div>
 
@@ -168,3 +212,4 @@ export const HeaderNavbar: React.FC = () => {
     </header>
   );
 };
+

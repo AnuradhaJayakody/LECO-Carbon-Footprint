@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { User, Facility, AppModule } from '../types';
 import { api } from '../services/api';
-import { supabase, isSupabaseConfigured, signInWithSupabaseAuth, signOutSupabaseAuth } from '../services/supabase';
+import { supabase, isSupabaseConfigured, signInWithSupabaseAuth, signOutSupabaseAuth, parseAssignedFacilityIds } from '../services/supabase';
 
 interface AuthContextType {
   user: User | null;
@@ -69,12 +69,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const allUsers = await api.getUsers();
           const verified = allUsers.find(u => u.id === parsedUser.id || u.email.toLowerCase() === parsedUser.email.toLowerCase());
           if (verified && verified.isActive) {
-            setUser(verified);
-            if (verified.role === 'facility_user' && verified.facilityId) {
-              setSelectedFacilityId(verified.facilityId);
-            } else if (verified.role === 'branch_admin' && verified.facilityId) {
-              setSelectedFacilityId(verified.facilityId);
-            } else if (verified.role === 'super_admin') {
+            const normalizedUser: User = {
+              ...verified,
+              assignedFacilityIds: parseAssignedFacilityIds(verified.assignedFacilityIds ?? (verified.facilityId ? [verified.facilityId] : []))
+            };
+            setUser(normalizedUser);
+            if (normalizedUser.role === 'facility_user' && normalizedUser.facilityId) {
+              setSelectedFacilityId(normalizedUser.facilityId);
+            } else if (normalizedUser.role === 'branch_admin' && normalizedUser.assignedFacilityIds?.length) {
+              setSelectedFacilityId(normalizedUser.assignedFacilityIds[0]);
+            } else if (normalizedUser.role === 'branch_admin' && normalizedUser.facilityId) {
+              setSelectedFacilityId(normalizedUser.facilityId);
+            } else if (normalizedUser.role === 'super_admin') {
               setSelectedFacilityId('ALL');
             }
           } else {
@@ -109,17 +115,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       // 2. Authenticate and retrieve RBAC user profile
       const res = await api.login(email, password);
-      const loggedUser = res.user;
+      const rawUser = res.user;
+      const loggedUser: User = {
+        ...rawUser,
+        assignedFacilityIds: parseAssignedFacilityIds(rawUser.assignedFacilityIds ?? (rawUser.facilityId ? [rawUser.facilityId] : []))
+      };
       setUser(loggedUser);
       localStorage.setItem(LOCAL_STORAGE_USER_KEY, JSON.stringify(loggedUser));
 
-      // Auto-set the active facility scope
+      // Auto-set the active facility scope based on user role
       if (loggedUser.role === 'facility_user' && loggedUser.facilityId) {
-        setSelectedFacilityId(loggedUser.facilityId);
-      } else if (loggedUser.role === 'branch_admin' && loggedUser.facilityId) {
         setSelectedFacilityId(loggedUser.facilityId);
       } else if (loggedUser.role === 'branch_admin' && loggedUser.assignedFacilityIds?.length) {
         setSelectedFacilityId(loggedUser.assignedFacilityIds[0]);
+      } else if (loggedUser.role === 'branch_admin' && loggedUser.facilityId) {
+        setSelectedFacilityId(loggedUser.facilityId);
       } else {
         setSelectedFacilityId('ALL');
       }
@@ -152,8 +162,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const allUsers = await api.getUsers();
         const updated = allUsers.find(u => u.id === user.id);
         if (updated) {
-          setUser(updated);
-          localStorage.setItem(LOCAL_STORAGE_USER_KEY, JSON.stringify(updated));
+          const normalizedUser: User = {
+            ...updated,
+            assignedFacilityIds: parseAssignedFacilityIds(updated.assignedFacilityIds ?? (updated.facilityId ? [updated.facilityId] : []))
+          };
+          setUser(normalizedUser);
+          localStorage.setItem(LOCAL_STORAGE_USER_KEY, JSON.stringify(normalizedUser));
         }
       } catch (err) {
         console.error('Error refreshing users:', err);
@@ -175,18 +189,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const hasFacilityAccess = (facilityId: string): boolean => {
     if (!user) return false;
-    if (facilityId === 'ALL') return isSuperAdmin;
     if (isSuperAdmin) return true;
+    if (facilityId === 'ALL') return isSuperAdmin;
     
     if (isBranchAdmin) {
-      const allowedIds = user.assignedFacilityIds || (user.facilityId ? [user.facilityId] : []);
-      if (allowedIds.includes(facilityId)) return true;
-      // Check if target facility is a child CSC of any assigned parent branch
-      const fac = facilities.find(f => f.id === facilityId);
-      if (fac && fac.parentId && allowedIds.includes(fac.parentId)) {
-        return true;
-      }
-      return false;
+      const allowedIds = parseAssignedFacilityIds(user.assignedFacilityIds?.length ? user.assignedFacilityIds : (user.facilityId ? [user.facilityId] : []));
+      return allowedIds.includes(facilityId);
     }
 
     return user.facilityId === facilityId;
@@ -197,12 +205,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return facilities;
     }
     if (isBranchAdmin) {
-      const allowedIds = user.assignedFacilityIds || (user.facilityId ? [user.facilityId] : []);
-      return facilities.filter(f => {
-        if (allowedIds.includes(f.id)) return true;
-        if (f.parentId && allowedIds.includes(f.parentId)) return true;
-        return false;
-      });
+      const allowedIds = parseAssignedFacilityIds(user.assignedFacilityIds?.length ? user.assignedFacilityIds : (user.facilityId ? [user.facilityId] : []));
+      return facilities.filter(f => allowedIds.includes(f.id));
     }
     if (user.facilityId) {
       return facilities.filter(f => f.id === user.facilityId);
@@ -250,3 +254,4 @@ export const useAuth = () => {
   }
   return context;
 };
+

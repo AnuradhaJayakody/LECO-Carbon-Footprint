@@ -30,7 +30,8 @@ import {
   signUpWithSupabaseAuth,
   safeSupabaseUpsertUser,
   generateUUID,
-  isValidUUID
+  isValidUUID,
+  parseAssignedFacilityIds
 } from '../services/supabase';
 
 // Explicit database row interface matching the real Supabase schema (full_name)
@@ -72,7 +73,11 @@ export function toSupabaseUserRow(user: Partial<User>): Record<string, any> {
   if (user.role !== undefined) row.role = user.role;
   if (user.facilityId !== undefined) row.facility_id = user.facilityId || null;
   if (user.facilityName !== undefined) row.facility_name = user.facilityName || null;
-  if (user.assignedFacilityIds !== undefined) row.assigned_facility_ids = user.assignedFacilityIds;
+  if (user.assignedFacilityIds !== undefined) {
+    row.assigned_facility_ids = Array.isArray(user.assignedFacilityIds)
+      ? user.assignedFacilityIds
+      : parseAssignedFacilityIds(user.assignedFacilityIds);
+  }
   if (user.jobRole !== undefined) row.job_role = user.jobRole;
   if (user.department !== undefined) row.department = user.department;
   if (user.contactNumber !== undefined) row.contact_number = user.contactNumber;
@@ -90,7 +95,7 @@ export function fromSupabaseUserRow(row: any): User {
     role: row.role,
     facilityId: row.facility_id || row.facilityId,
     facilityName: row.facility_name || row.facilityName,
-    assignedFacilityIds: row.assigned_facility_ids || row.assignedFacilityIds || [],
+    assignedFacilityIds: parseAssignedFacilityIds(row.assigned_facility_ids ?? row.assignedFacilityIds),
     jobRole: row.job_role || row.jobRole,
     department: row.department,
     contactNumber: row.contact_number || row.contactNumber,
@@ -228,8 +233,10 @@ export const UserManager: React.FC = () => {
     setPassword('Sadmin@cf369');
     setName('');
     setRole('facility_user');
-    setFacilityId(facilities[0]?.id || '');
-    setAssignedFacilityIds(facilities[0]?.id ? [facilities[0].id] : []);
+    const defaultFac = parentBranches[0] || facilities[0];
+    const defaultFacId = defaultFac?.id || '';
+    setFacilityId(defaultFacId);
+    setAssignedFacilityIds(defaultFacId ? [defaultFacId] : []);
     setJobRole('Customer Service Officer');
     setDepartment('Distribution Operations');
     setContactNumber('+94 ');
@@ -245,8 +252,10 @@ export const UserManager: React.FC = () => {
     setPassword('');
     setName(u.name);
     setRole(u.role);
-    setFacilityId(u.facilityId || '');
-    setAssignedFacilityIds(u.assignedFacilityIds || (u.facilityId ? [u.facilityId] : []));
+    const parsedAssigned = parseAssignedFacilityIds(u.assignedFacilityIds);
+    const resolvedFacId = u.facilityId || (parsedAssigned.length > 0 ? parsedAssigned[0] : '');
+    setFacilityId(resolvedFacId);
+    setAssignedFacilityIds(parsedAssigned.length > 0 ? parsedAssigned : (resolvedFacId ? [resolvedFacId] : []));
     setJobRole(u.jobRole || '');
     setDepartment(u.department || '');
     setContactNumber(u.contactNumber || '');
@@ -254,6 +263,48 @@ export const UserManager: React.FC = () => {
     setAllowedModules(u.allowedModules || ['dashboard', 'scope1', 'scope2', 'scope3', 'reports', 'calculator']);
     setIsActive(u.isActive);
     setIsModalOpen(true);
+  };
+
+  const handleRoleChange = (newRole: UserRole) => {
+    setRole(newRole);
+    if (newRole === 'branch_admin') {
+      const currentFac = facilities.find(f => f.id === facilityId);
+      const targetBranch = currentFac?.isParent || currentFac?.type === 'Branch'
+        ? currentFac
+        : (parentBranches[0] || facilities[0]);
+
+      if (targetBranch) {
+        setFacilityId(targetBranch.id);
+        const childIds = facilities.filter(f => f.parentId === targetBranch.id).map(f => f.id);
+        setAssignedFacilityIds(Array.from(new Set([targetBranch.id, ...childIds])));
+      } else if (facilities.length > 0) {
+        setAssignedFacilityIds([facilities[0].id]);
+      }
+    } else if (newRole === 'facility_user') {
+      const defaultFac = facilityId || (facilities[0]?.id ?? '');
+      setFacilityId(defaultFac);
+      if (defaultFac) {
+        setAssignedFacilityIds([defaultFac]);
+      }
+    } else if (newRole === 'super_admin') {
+      setFacilityId('');
+      setAssignedFacilityIds([]);
+    }
+  };
+
+  const selectBranchTree = (branchId: string) => {
+    const childIds = facilities.filter(f => f.parentId === branchId).map(f => f.id);
+    const branchTreeIds = [branchId, ...childIds];
+    setAssignedFacilityIds(Array.from(new Set([...assignedFacilityIds, ...branchTreeIds])));
+    if (!facilityId) setFacilityId(branchId);
+  };
+
+  const selectAllFacilities = () => {
+    setAssignedFacilityIds(facilities.map(f => f.id));
+  };
+
+  const clearAssignedFacilities = () => {
+    setAssignedFacilityIds([]);
   };
 
   const toggleModule = (mod: AppModule) => {
@@ -266,9 +317,17 @@ export const UserManager: React.FC = () => {
 
   const toggleAssignedFacility = (facId: string) => {
     if (assignedFacilityIds.includes(facId)) {
-      setAssignedFacilityIds(assignedFacilityIds.filter(id => id !== facId));
+      const updated = assignedFacilityIds.filter(id => id !== facId);
+      setAssignedFacilityIds(updated);
+      if (facilityId === facId) {
+        setFacilityId(updated[0] || '');
+      }
     } else {
-      setAssignedFacilityIds([...assignedFacilityIds, facId]);
+      const updated = [...assignedFacilityIds, facId];
+      setAssignedFacilityIds(updated);
+      if (!facilityId) {
+        setFacilityId(facId);
+      }
     }
   };
 
@@ -288,6 +347,16 @@ export const UserManager: React.FC = () => {
       return;
     }
 
+    if (role === 'branch_admin' && assignedFacilityIds.length === 0) {
+      notify('Please select at least one branch or CSC for the Branch Admin scope.', 'error');
+      return;
+    }
+
+    if (role === 'facility_user' && !facilityId) {
+      notify('Please select a primary facility or CSC for the Facility User.', 'error');
+      return;
+    }
+
     if (!editingUser) {
       const accessPassword = password?.trim() || 'Sadmin@cf369';
       if (accessPassword.length < 6) {
@@ -297,16 +366,27 @@ export const UserManager: React.FC = () => {
     }
 
     setIsSubmitting(true);
-    const selectedFacObj = facilities.find(f => f.id === facilityId);
+
+    const finalAssignedFacilityIds = role === 'branch_admin'
+      ? (assignedFacilityIds.length > 0 ? assignedFacilityIds : (facilityId ? [facilityId] : []))
+      : (role === 'facility_user' && facilityId ? [facilityId] : []);
+
+    const primaryFacilityId = role === 'super_admin'
+      ? undefined
+      : (role === 'facility_user' ? facilityId : (facilityId || finalAssignedFacilityIds[0]));
+
+    const primaryFacilityName = role === 'super_admin'
+      ? undefined
+      : (facilities.find(f => f.id === primaryFacilityId)?.name || undefined);
 
     const payload: Partial<User> = {
       id: editingUser ? editingUser.id : undefined,
       email: cleanEmail,
       name: cleanName,
       role,
-      facilityId: role === 'super_admin' ? undefined : facilityId || undefined,
-      facilityName: role === 'super_admin' ? undefined : selectedFacObj?.name,
-      assignedFacilityIds: role === 'branch_admin' ? assignedFacilityIds : (facilityId ? [facilityId] : []),
+      facilityId: primaryFacilityId,
+      facilityName: primaryFacilityName,
+      assignedFacilityIds: finalAssignedFacilityIds,
       jobRole: jobRole.trim(),
       department: department.trim(),
       contactNumber: contactNumber.trim(),
@@ -361,8 +441,8 @@ export const UserManager: React.FC = () => {
               name: cleanName,
               full_name: cleanName,
               role,
-              facility_id: facilityId || null,
-              facility_name: selectedFacObj?.name || null
+              facility_id: primaryFacilityId || null,
+              facility_name: primaryFacilityName || null
             });
 
             if (authRes?.user?.id && isValidUUID(authRes.user.id)) {
@@ -699,24 +779,70 @@ export const UserManager: React.FC = () => {
                         )}
                       </td>
 
-                      {/* Facility */}
+                      {/* Facility Scope */}
                       <td className="py-3.5 px-4">
                         {u.role === 'super_admin' ? (
-                          <span className="text-emerald-700 font-bold flex items-center gap-1">
-                            <Layers className="w-3 h-3" />
-                            Global LECO Scope (All Facilities)
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold text-emerald-800 bg-emerald-50 border border-emerald-200">
+                            <Layers className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                            <span>Global LECO Scope (All Facilities)</span>
                           </span>
+                        ) : u.role === 'branch_admin' ? (
+                          (() => {
+                            const assignedIds = parseAssignedFacilityIds(
+                              u.assignedFacilityIds?.length ? u.assignedFacilityIds : (u.facilityId ? [u.facilityId] : [])
+                            );
+                            const assignedFacs = facilities.filter(f => assignedIds.includes(f.id));
+                            const primaryFac = facilities.find(f => f.id === u.facilityId) || 
+                              assignedFacs.find(f => f.type === 'Branch' || f.isParent) || 
+                              assignedFacs[0];
+                            const subordinateCscs = assignedFacs.filter(f => f.id !== primaryFac?.id);
+
+                            if (assignedFacs.length === 0 && !primaryFac) {
+                              return (
+                                <div className="flex items-center gap-1.5 text-xs font-medium text-amber-700 bg-amber-50 px-2 py-1 rounded border border-amber-200">
+                                  <AlertCircle className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                                  <span>No Specific Scope Assigned</span>
+                                </div>
+                              );
+                            }
+
+                            return (
+                              <div className="space-y-1">
+                                <div className="font-bold text-slate-800 flex items-center gap-1.5">
+                                  <Building2 className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                                  <span>{primaryFac?.name || u.facilityName || 'Assigned Branch'}</span>
+                                </div>
+                                {assignedFacs.length > 1 ? (
+                                  <div className="flex flex-wrap items-center gap-1">
+                                    <span 
+                                      className="inline-flex items-center text-[10px] font-semibold bg-blue-50 text-blue-700 border border-blue-200 px-1.5 py-0.5 rounded cursor-help"
+                                      title={`Assigned facilities: ${assignedFacs.map(f => f.name).join(', ')}`}
+                                    >
+                                      {subordinateCscs.length > 0 
+                                        ? `+${subordinateCscs.length} subordinate CSC${subordinateCscs.length > 1 ? 's' : ''}` 
+                                        : `${assignedFacs.length} Facilities Scope`}
+                                    </span>
+                                    <span className="text-[10px] text-slate-500 font-medium">
+                                      ({assignedFacs.length} total)
+                                    </span>
+                                  </div>
+                                ) : (
+                                  <span className="text-[10px] text-blue-600 font-medium block">
+                                    Single Facility Scope
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })()
                         ) : (
                           <div>
-                            <div className="font-semibold text-slate-800 flex items-center gap-1">
-                              <Building2 className="w-3 h-3 text-slate-400" />
-                              <span>{u.facilityName || 'Assigned Branch'}</span>
+                            <div className="font-semibold text-slate-800 flex items-center gap-1.5">
+                              <Building2 className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                              <span>{u.facilityName || facilities.find(f => f.id === u.facilityId)?.name || 'Assigned Facility'}</span>
                             </div>
-                            {u.assignedFacilityIds && u.assignedFacilityIds.length > 1 && (
-                              <div className="text-[10px] text-blue-600 font-medium">
-                                +{u.assignedFacilityIds.length - 1} subordinate CSCs
-                              </div>
-                            )}
+                            <span className="text-[10px] text-slate-500 font-medium">
+                              {facilities.find(f => f.id === u.facilityId)?.type || 'CSC'} Unit
+                            </span>
                           </div>
                         )}
                       </td>
@@ -910,14 +1036,15 @@ export const UserManager: React.FC = () => {
                 </div>
               )}
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Role Selection & Dynamic Facility Scope Assignment */}
+              <div className={`grid grid-cols-1 ${role === 'facility_user' || role === 'super_admin' ? 'sm:grid-cols-2' : 'sm:grid-cols-1'} gap-4`}>
                 <div>
                   <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">
                     User RBAC Role *
                   </label>
                   <select
                     value={role}
-                    onChange={(e) => setRole(e.target.value as UserRole)}
+                    onChange={(e) => handleRoleChange(e.target.value as UserRole)}
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-800 font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   >
                     <option value="facility_user">Facility User (Scoped to Specific CSC/Depot)</option>
@@ -926,64 +1053,189 @@ export const UserManager: React.FC = () => {
                   </select>
                 </div>
 
-                <div>
-                  <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">
-                    Primary Facility / CSC Assignment
-                  </label>
-                  <select
-                    value={facilityId}
-                    onChange={(e) => setFacilityId(e.target.value)}
-                    disabled={role === 'super_admin'}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:opacity-50"
-                  >
-                    {parentBranches.map(branch => {
-                      const children = facilities.filter(f => f.parentId === branch.id);
-                      return (
-                        <optgroup key={branch.id} label={`📍 ${branch.name}`} className="font-bold">
-                          <option value={branch.id}>
-                            {branch.name} (Parent Branch)
-                          </option>
-                          {children.map(child => (
-                            <option key={child.id} value={child.id}>
-                              &nbsp;&nbsp;&bull; {child.name} (CSC)
+                {/* Facility User: ONLY single Primary Facility / CSC Assignment Dropdown */}
+                {role === 'facility_user' && (
+                  <div>
+                    <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">
+                      Primary Facility / CSC Assignment *
+                    </label>
+                    <select
+                      value={facilityId}
+                      onChange={(e) => {
+                        const nextId = e.target.value;
+                        setFacilityId(nextId);
+                        setAssignedFacilityIds([nextId]);
+                      }}
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    >
+                      {parentBranches.map(branch => {
+                        const children = facilities.filter(f => f.parentId === branch.id);
+                        return (
+                          <optgroup key={branch.id} label={`📍 ${branch.name}`} className="font-bold">
+                            <option value={branch.id}>
+                              {branch.name} (Parent Branch)
                             </option>
-                          ))}
-                        </optgroup>
-                      );
-                    })}
-                    <optgroup label="🏭 Special Depots & Centers">
-                      {facilities.filter(f => !f.parentId && f.type !== 'Branch').map(fac => (
-                        <option key={fac.id} value={fac.id}>
-                          {fac.name} ({fac.type})
-                        </option>
-                      ))}
-                    </optgroup>
-                  </select>
-                </div>
+                            {children.map(child => (
+                              <option key={child.id} value={child.id}>
+                                &nbsp;&nbsp;&bull; {child.name} (CSC)
+                              </option>
+                            ))}
+                          </optgroup>
+                        );
+                      })}
+                      <optgroup label="🏭 Special Depots & Centers">
+                        {facilities.filter(f => !f.parentId && f.type !== 'Branch').map(fac => (
+                          <option key={fac.id} value={fac.id}>
+                            {fac.name} ({fac.type})
+                          </option>
+                        ))}
+                      </optgroup>
+                    </select>
+                  </div>
+                )}
+
+                {/* Super Admin: Disabled Global Scope indicator */}
+                {role === 'super_admin' && (
+                  <div>
+                    <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">
+                      Operational Boundary Scope
+                    </label>
+                    <div className="w-full px-3 py-2 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 font-bold flex items-center gap-2 text-xs h-[42px]">
+                      <Layers className="w-4 h-4 text-emerald-600 shrink-0" />
+                      <span>Global Scope &bull; All LECO Corporate Facilities</span>
+                    </div>
+                  </div>
+                )}
               </div>
 
-              {/* Multi-Facility Assignment for Branch Admin */}
+              {/* Branch Admin: Multi-Facility Scope Selection (Assigned Branches & CSCs) */}
               {role === 'branch_admin' && (
-                <div className="p-3.5 bg-blue-50/60 border border-blue-200 rounded-xl space-y-2">
-                  <div className="font-bold text-blue-900 uppercase tracking-wider text-[11px] flex items-center gap-1.5">
-                    <Layers className="w-3.5 h-3.5 text-blue-600" />
-                    Multi-Facility Scope Selection (Assigned Branches & CSCs)
+                <div className="p-3.5 bg-blue-50/70 border border-blue-200 rounded-xl space-y-2.5">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <div className="font-bold text-blue-900 uppercase tracking-wider text-[11px] flex items-center gap-1.5">
+                      <Layers className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                      <span>Multi-Facility Scope Selection (Assigned Branches & CSCs) *</span>
+                    </div>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 text-blue-800 border border-blue-200">
+                      {assignedFacilityIds.length} of {facilities.length} selected
+                    </span>
                   </div>
+
                   <p className="text-[11px] text-blue-800">
-                    Select all facilities and CSCs this Branch Admin has supervisory authority to view and audit:
+                    Select the regional branches and subordinate CSCs this Branch Admin has supervisory authority to view and audit:
                   </p>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-36 overflow-y-auto pt-1">
-                    {facilities.map(fac => (
-                      <label key={fac.id} className="flex items-center gap-2 p-1.5 bg-white rounded-lg border border-slate-200 hover:bg-blue-50 text-slate-700 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={assignedFacilityIds.includes(fac.id)}
-                          onChange={() => toggleAssignedFacility(fac.id)}
-                          className="rounded text-blue-600 focus:ring-blue-500"
-                        />
-                        <span className="truncate">{fac.name}</span>
-                      </label>
+
+                  {/* Quick Select Actions */}
+                  <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+                    {parentBranches.map(branch => (
+                      <button
+                        key={branch.id}
+                        type="button"
+                        onClick={() => selectBranchTree(branch.id)}
+                        className="px-2 py-1 text-[10px] font-semibold bg-white border border-blue-300 text-blue-700 hover:bg-blue-100 rounded-lg transition-colors shadow-xs"
+                      >
+                        📍 + {branch.name} Tree
+                      </button>
                     ))}
+                    <button
+                      type="button"
+                      onClick={selectAllFacilities}
+                      className="px-2 py-1 text-[10px] font-semibold bg-white border border-slate-300 text-slate-700 hover:bg-slate-100 rounded-lg transition-colors shadow-xs"
+                    >
+                      🏢 Select All
+                    </button>
+                    <button
+                      type="button"
+                      onClick={clearAssignedFacilities}
+                      className="px-2 py-1 text-[10px] font-semibold bg-white border border-slate-300 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors shadow-xs"
+                    >
+                      🔄 Clear All
+                    </button>
+                  </div>
+
+                  {/* Grouped Facility Checkboxes */}
+                  <div className="space-y-2 max-h-52 overflow-y-auto pt-1 pr-1">
+                    {parentBranches.map(branch => {
+                      const children = facilities.filter(f => f.parentId === branch.id);
+                      const isBranchChecked = assignedFacilityIds.includes(branch.id);
+                      const areAllChildrenChecked = children.length > 0 && children.every(c => assignedFacilityIds.includes(c.id));
+
+                      const toggleBranchAndChildren = () => {
+                        const allGroupIds = [branch.id, ...children.map(c => c.id)];
+                        const allChecked = isBranchChecked && (children.length === 0 || areAllChildrenChecked);
+                        if (allChecked) {
+                          setAssignedFacilityIds(assignedFacilityIds.filter(id => !allGroupIds.includes(id)));
+                        } else {
+                          setAssignedFacilityIds(Array.from(new Set([...assignedFacilityIds, ...allGroupIds])));
+                        }
+                      };
+
+                      return (
+                        <div key={branch.id} className="bg-white/90 border border-slate-200 rounded-lg p-2 space-y-1.5">
+                          <div className="flex items-center justify-between">
+                            <label className="flex items-center gap-2 cursor-pointer font-bold text-xs text-slate-800">
+                              <input
+                                type="checkbox"
+                                checked={isBranchChecked}
+                                onChange={() => toggleAssignedFacility(branch.id)}
+                                className="rounded text-blue-600 focus:ring-blue-500"
+                              />
+                              <span className="flex items-center gap-1">
+                                <span>{branch.name}</span>
+                                <span className="text-[9px] font-semibold bg-slate-100 text-slate-600 px-1 py-0.2 rounded">Branch</span>
+                              </span>
+                            </label>
+                            {children.length > 0 && (
+                              <button
+                                type="button"
+                                onClick={toggleBranchAndChildren}
+                                className="text-[10px] font-medium text-blue-600 hover:text-blue-800 underline"
+                              >
+                                {isBranchChecked && areAllChildrenChecked ? 'Deselect Group' : 'Select Branch + All CSCs'}
+                              </button>
+                            )}
+                          </div>
+
+                          {children.length > 0 && (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-1 pl-4 pt-1 border-t border-slate-100">
+                              {children.map(child => (
+                                <label key={child.id} className="flex items-center gap-2 p-1 rounded hover:bg-blue-50 text-slate-700 cursor-pointer text-xs">
+                                  <input
+                                    type="checkbox"
+                                    checked={assignedFacilityIds.includes(child.id)}
+                                    onChange={() => toggleAssignedFacility(child.id)}
+                                    className="rounded text-blue-600 focus:ring-blue-500"
+                                  />
+                                  <span className="truncate">{child.name}</span>
+                                </label>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+
+                    {/* Standalone Facilities */}
+                    {facilities.filter(f => !f.parentId && f.type !== 'Branch').length > 0 && (
+                      <div className="bg-white/90 border border-slate-200 rounded-lg p-2 space-y-1">
+                        <div className="font-bold text-xs text-slate-800 mb-1">
+                          Specialised Centers & Depots
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1">
+                          {facilities.filter(f => !f.parentId && f.type !== 'Branch').map(fac => (
+                            <label key={fac.id} className="flex items-center gap-2 p-1 rounded hover:bg-blue-50 text-slate-700 cursor-pointer text-xs">
+                              <input
+                                type="checkbox"
+                                checked={assignedFacilityIds.includes(fac.id)}
+                                onChange={() => toggleAssignedFacility(fac.id)}
+                                className="rounded text-blue-600 focus:ring-blue-500"
+                              />
+                              <span className="truncate">{fac.name} ({fac.type})</span>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}

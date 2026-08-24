@@ -188,6 +188,33 @@ export function generateUUID(): string {
   });
 }
 
+export function parseAssignedFacilityIds(val: any): string[] {
+  if (!val) return [];
+  if (Array.isArray(val)) {
+    return val.map(String).map(s => s.trim()).filter(Boolean);
+  }
+  if (typeof val === 'string') {
+    const trimmed = val.trim();
+    if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (Array.isArray(parsed)) {
+          return parsed.map(String).map(s => s.trim()).filter(Boolean);
+        }
+      } catch {}
+    }
+    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+      return trimmed
+        .slice(1, -1)
+        .split(',')
+        .map(s => s.replace(/^["']|["']$/g, '').trim())
+        .filter(Boolean);
+    }
+    if (trimmed.length > 0) return [trimmed];
+  }
+  return [];
+}
+
 export function toUserProfileRow(user: Partial<User>): Record<string, any> {
   const row: Record<string, any> = {};
   if (user.id !== undefined) {
@@ -209,7 +236,11 @@ export function toUserProfileRow(user: Partial<User>): Record<string, any> {
   if (user.role !== undefined) row.role = user.role;
   if (user.facilityId !== undefined) row.facility_id = user.facilityId || null;
   if (user.facilityName !== undefined) row.facility_name = user.facilityName || null;
-  if (user.assignedFacilityIds !== undefined) row.assigned_facility_ids = user.assignedFacilityIds;
+  if (user.assignedFacilityIds !== undefined) {
+    row.assigned_facility_ids = Array.isArray(user.assignedFacilityIds) 
+      ? user.assignedFacilityIds 
+      : parseAssignedFacilityIds(user.assignedFacilityIds);
+  }
   if (user.jobRole !== undefined) row.job_role = user.jobRole;
   if (user.department !== undefined) row.department = user.department;
   if (user.contactNumber !== undefined) row.contact_number = user.contactNumber;
@@ -227,7 +258,7 @@ export function fromUserProfileRow(row: any): User {
     role: row.role,
     facilityId: row.facility_id || row.facilityId,
     facilityName: row.facility_name || row.facilityName,
-    assignedFacilityIds: row.assigned_facility_ids || row.assignedFacilityIds || [],
+    assignedFacilityIds: parseAssignedFacilityIds(row.assigned_facility_ids ?? row.assignedFacilityIds),
     jobRole: row.job_role || row.jobRole,
     department: row.department,
     contactNumber: row.contact_number || row.contactNumber,
