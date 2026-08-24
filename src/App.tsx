@@ -24,29 +24,12 @@ const MainLayout: React.FC = () => {
     toast 
   } = useAuth();
 
-  if (isLoading) {
-    return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-10 h-10 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin" />
-          <span className="text-sm font-semibold text-slate-400">Loading LECO Carbon Footprint Platform...</span>
-        </div>
-      </div>
-    );
-  }
-
-  // Enforce Real Login: App only allows access AFTER successful login
-  if (!isAuthenticated) {
-    return <LoginScreen />;
-  }
-
   return (
-    <div className="min-h-screen bg-slate-100 flex flex-col text-slate-900">
-      
-      {/* Toast Notification Container */}
+    <>
+      {/* Toast Notification Container with high z-index (z-[9999]) to always display on top of all modals */}
       {toast && (
-        <div className="fixed top-4 right-4 z-50 animate-bounce duration-300">
-          <div className={`px-4 py-3 rounded-2xl shadow-xl border flex items-center gap-3 text-xs font-semibold ${
+        <div className="fixed top-4 right-4 z-[9999] animate-bounce duration-300 pointer-events-none">
+          <div className={`px-4 py-3 rounded-2xl shadow-2xl border flex items-center gap-3 text-xs font-semibold pointer-events-auto ${
             toast.type === 'success' ? 'bg-emerald-900 text-white border-emerald-700' :
             toast.type === 'error' ? 'bg-rose-900 text-white border-rose-700' :
             toast.type === 'warning' ? 'bg-amber-900 text-white border-amber-700' :
@@ -61,28 +44,40 @@ const MainLayout: React.FC = () => {
         </div>
       )}
 
-      {/* Global Top Navbar */}
-      <HeaderNavbar />
+      {isLoading ? (
+        <div className="min-h-screen bg-slate-950 flex items-center justify-center">
+          <div className="flex flex-col items-center gap-3">
+            <div className="w-10 h-10 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+            <span className="text-sm font-semibold text-slate-400">Loading LECO Carbon Footprint Platform...</span>
+          </div>
+        </div>
+      ) : !isAuthenticated ? (
+        <LoginScreen />
+      ) : (
+        <div className="min-h-screen bg-slate-100 flex flex-col text-slate-900">
+          {/* Global Top Navbar */}
+          <HeaderNavbar />
 
-      {/* Main Workspace with Sidebar and Active Content Area */}
-      <div className="flex flex-1 overflow-hidden">
-        <Sidebar currentModule={activeModule} onSelectModule={setActiveModule} />
+          {/* Main Workspace with Sidebar and Active Content Area */}
+          <div className="flex flex-1 overflow-hidden">
+            <Sidebar currentModule={activeModule} onSelectModule={setActiveModule} />
 
-        <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
-          {activeModule === 'dashboard' && <Dashboard />}
-          {activeModule === 'scope1' && <Scope1Manager />}
-          {activeModule === 'scope2' && <Scope2Manager />}
-          {activeModule === 'scope3' && <Scope3Manager />}
-          {activeModule === 'reports' && <ReportsManager />}
-          {activeModule === 'facilities' && <FacilitiesManager />}
-          {activeModule === 'users' && <UserManager />}
-          {activeModule === 'factors' && <EmissionFactorsManager />}
-          {activeModule === 'calculator' && <QuickEstimator />}
-          {activeModule === 'sync' && <SupabaseSync />}
-        </main>
-      </div>
-
-    </div>
+            <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
+              {activeModule === 'dashboard' && <Dashboard />}
+              {activeModule === 'scope1' && <Scope1Manager />}
+              {activeModule === 'scope2' && <Scope2Manager />}
+              {activeModule === 'scope3' && <Scope3Manager />}
+              {activeModule === 'reports' && <ReportsManager />}
+              {activeModule === 'facilities' && <FacilitiesManager />}
+              {activeModule === 'users' && <UserManager />}
+              {activeModule === 'factors' && <EmissionFactorsManager />}
+              {activeModule === 'calculator' && <QuickEstimator />}
+              {activeModule === 'sync' && <SupabaseSync />}
+            </main>
+          </div>
+        </div>
+      )}
+    </>
   );
 };
 
