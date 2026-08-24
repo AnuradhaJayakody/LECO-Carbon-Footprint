@@ -498,11 +498,23 @@ export async function safeSupabaseUpsertUser(
       }
     }
 
-    // 2. Foreign key violation on facility_id (23503)
-    if ((error.code === '23503' || error.message?.includes('foreign key') || error.message?.includes('violates foreign key')) && currentPayload.facility_id) {
-      console.warn('[Supabase Schema Safe] Facility ID foreign key constraint violation. Setting facility_id = null');
-      currentPayload.facility_id = null;
-      continue;
+    // 2. Foreign key violation (23503)
+    if (error.code === '23503' || error.message?.includes('foreign key') || error.message?.includes('violates foreign key')) {
+      if (currentPayload.auth_user_id) {
+        console.warn('[Supabase Schema Safe] Foreign key violation on auth_user_id. Removing auth_user_id and retrying');
+        delete currentPayload.auth_user_id;
+        continue;
+      }
+      if (currentPayload.facility_id) {
+        console.warn('[Supabase Schema Safe] Facility ID foreign key constraint violation. Setting facility_id = null');
+        currentPayload.facility_id = null;
+        continue;
+      }
+      if (operation === 'insert' && currentPayload.id) {
+        console.warn('[Supabase Schema Safe] Foreign key violation on id. Generating new UUID for id');
+        currentPayload.id = generateUUID();
+        continue;
+      }
     }
 
     // 3. Duplicate email on insert -> switch seamlessly to update

@@ -276,6 +276,10 @@ export const UserManager: React.FC = () => {
   // CREATE / UPDATE: Real Supabase CRUD operations using full_name column
   // ==========================================================================
   const handleSaveUser = async (e: React.FormEvent) => {
+    if (e && typeof e.preventDefault === 'function') {
+      e.preventDefault();
+    }
+
     const cleanEmail = email.trim().toLowerCase();
     const cleanName = name.trim();
 
@@ -296,6 +300,7 @@ export const UserManager: React.FC = () => {
     const selectedFacObj = facilities.find(f => f.id === facilityId);
 
     const payload: Partial<User> = {
+      id: editingUser ? editingUser.id : undefined,
       email: cleanEmail,
       name: cleanName,
       role,
@@ -309,7 +314,8 @@ export const UserManager: React.FC = () => {
       allowedModules: role === 'super_admin' 
         ? ['dashboard', 'scope1', 'scope2', 'scope3', 'reports', 'facilities', 'users', 'factors', 'calculator', 'sync']
         : allowedModules,
-      isActive
+      isActive,
+      authUserId: editingUser?.authUserId
     };
 
     try {
@@ -363,10 +369,10 @@ export const UserManager: React.FC = () => {
               authUserId = authRes.user.id;
             }
           } catch (sbAuthErr: any) {
-            console.error('Supabase Auth user creation error:', sbAuthErr);
+            console.warn('Supabase Auth user creation notice:', sbAuthErr);
             const rawMsg = sbAuthErr?.message || String(sbAuthErr || '');
             
-            // Duplicate user registration in Supabase Auth
+            // 1. Duplicate user registration in Supabase Auth
             if (
               rawMsg.toLowerCase().includes('already registered') ||
               rawMsg.toLowerCase().includes('already exists') ||
@@ -377,31 +383,44 @@ export const UserManager: React.FC = () => {
               setIsSubmitting(false);
               return;
             } 
-            // Password validation failure
+            // 2. Email sign-up rate limit exceeded (Supabase free tier email limit)
+            else if (
+              rawMsg.toLowerCase().includes('rate limit') ||
+              sbAuthErr.status === 429 ||
+              rawMsg.toLowerCase().includes('too many requests')
+            ) {
+              console.warn('[UserManager] Supabase Auth email rate limit reached. Proceeding with database profile creation.');
+              notify('Supabase Auth Notice: Email sign-up rate limit reached. Creating user profile in PostgreSQL database.', 'warning');
+            }
+            // 3. Password validation failure
             else if (rawMsg.toLowerCase().includes('password')) {
               notify(`Authentication Password Error: ${rawMsg}`, 'error');
               setIsSubmitting(false);
               return;
             }
-            // Invalid email format
-            else if (rawMsg.toLowerCase().includes('email')) {
+            // 4. Invalid email format specifically (not rate limit)
+            else if (
+              rawMsg.toLowerCase().includes('invalid email') ||
+              rawMsg.toLowerCase().includes('valid email') ||
+              rawMsg.toLowerCase().includes('invalid_email') ||
+              rawMsg.toLowerCase().includes('email address is invalid')
+            ) {
               notify(`Authentication Email Error: ${rawMsg}`, 'error');
               setIsSubmitting(false);
               return;
             }
-            // Network connection error
+            // 5. Network connection error
             else if (
               sbAuthErr.isNetworkError ||
               rawMsg.toLowerCase().includes('failed to fetch') ||
               rawMsg.toLowerCase().includes('network')
             ) {
-              notify(`Supabase Auth Connection Warning: Could not reach auth server (${rawMsg}). Creating profile with local credentials.`, 'warning');
+              notify(`Supabase Auth Connection Warning: Could not reach auth server (${rawMsg}). Creating profile in database.`, 'warning');
             } 
-            // Generic Auth failure
+            // 6. Other Auth warnings
             else {
-              notify(`Supabase Auth Error: ${rawMsg}`, 'error');
-              setIsSubmitting(false);
-              return;
+              console.warn(`Supabase Auth creation notice: ${rawMsg}`);
+              notify(`Supabase Auth Notice: ${rawMsg}. Creating user profile in database.`, 'info');
             }
           }
         }
