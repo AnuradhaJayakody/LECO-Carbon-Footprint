@@ -95,7 +95,11 @@ export function fromSupabaseUserRow(row: any): User {
     role: row.role,
     facilityId: row.facility_id || row.facilityId,
     facilityName: row.facility_name || row.facilityName,
-    assignedFacilityIds: parseAssignedFacilityIds(row.assigned_facility_ids ?? row.assignedFacilityIds),
+    assignedFacilityIds: parseAssignedFacilityIds(
+      row.assigned_facility_ids ?? 
+      row.assignedFacilityIds ?? 
+      (row.role === 'branch_admin' && (row.facility_id || row.facilityId) ? [row.facility_id || row.facilityId] : [])
+    ),
     jobRole: row.job_role || row.jobRole,
     department: row.department,
     contactNumber: row.contact_number || row.contactNumber,

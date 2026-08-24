@@ -1,8 +1,13 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { Facility, FacilityType, JobRole } from '../types';
 import { api } from '../services/api';
-import { supabase, toFacilityRow } from '../services/supabase';
+import { 
+  supabase, 
+  toFacilityRow, 
+  fromFacilityRow, 
+  isSupabaseConfigured 
+} from '../services/supabase';
 import { 
   Building2, 
   Plus, 
@@ -20,19 +25,128 @@ import {
   FileText,
   AlertTriangle,
   ChevronRight,
-  ShieldAlert
+  ShieldAlert,
+  RefreshCw,
+  Database,
+  Loader2
 } from 'lucide-react';
+
+/**
+ * Robust Supabase facility upsert helper.
+ * Handles schema column discrepancies (PGRST204), foreign key constraints (23503),
+ * and duplicate code handling (23505).
+ */
+async function safeSupabaseFacilityMutation(
+  operation: 'insert' | 'update' | 'delete',
+  payload: Record<string, any>,
+  facilityId?: string
+): Promise<{ success: boolean; data?: any; error?: any }> {
+  if (!supabase) {
+    return { success: false, error: new Error('Supabase client is not configured') };
+  }
+
+  if (operation === 'delete') {
+    if (!facilityId) return { success: false, error: new Error('Facility ID required for deletion') };
+    const { error } = await supabase.from('facilities').delete().eq('id', facilityId);
+    if (error) return { success: false, error };
+    return { success: true };
+  }
+
+  let currentPayload = { ...payload };
+  const maxRetries = 8;
+  let attempt = 0;
+
+  while (attempt < maxRetries) {
+    attempt++;
+    let result: any;
+
+    try {
+      if (operation === 'insert') {
+        result = await supabase.from('facilities').insert([currentPayload]).select().maybeSingle();
+      } else {
+        const idToUpdate = facilityId || currentPayload.id;
+        result = await supabase.from('facilities').update(currentPayload).eq('id', idToUpdate).select().maybeSingle();
+      }
+
+      const { data, error } = result;
+
+      if (!error) {
+        return { success: true, data: data ? fromFacilityRow(data) : undefined };
+      }
+
+      // Handle missing column errors: PGRST204 or column does not exist
+      if (
+        error.code === 'PGRST204' || 
+        error.code === '42703' || 
+        error.message?.includes('Could not find the') || 
+        (error.message?.includes('column') && error.message?.includes('does not exist'))
+      ) {
+        const match = 
+          error.message?.match(/Could not find the '([^']+)' column/) ||
+          error.message?.match(/column "([^"]+)" of relation/) ||
+          error.message?.match(/column "([^"]+)" does not exist/) ||
+          error.message?.match(/column '([^']+)' does not exist/) ||
+          error.message?.match(/column ([a-zA-Z0-9_]+) does not exist/);
+        const missingCol = match ? match[1] : null;
+
+        if (missingCol && currentPayload[missingCol] !== undefined) {
+          console.warn(`[Supabase Facilities] Pruning missing column '${missingCol}' and retrying`);
+          delete currentPayload[missingCol];
+          continue;
+        }
+
+        // Fallback pruning of optional columns in safe order
+        const optionalCols = [
+          'job_roles',
+          'solar_capacity_kw',
+          'has_solar_pv',
+          'electricity_account_no',
+          'contact_number',
+          'head_designation',
+          'parent_name',
+          'parent_id'
+        ];
+        const nextCol = optionalCols.find(col => currentPayload[col] !== undefined);
+        if (nextCol) {
+          console.warn(`[Supabase Facilities] Pruning optional column '${nextCol}' and retrying`);
+          delete currentPayload[nextCol];
+          continue;
+        }
+      }
+
+      // Handle foreign key constraint error (23503) on parent_id
+      if (error.code === '23503' || error.message?.includes('foreign key') || error.message?.includes('violates foreign key')) {
+        if (currentPayload.parent_id) {
+          console.warn('[Supabase Facilities] Foreign key violation on parent_id. Setting parent_id = null');
+          currentPayload.parent_id = null;
+          continue;
+        }
+      }
+
+      return { success: false, error };
+    } catch (err: any) {
+      return { success: false, error: err };
+    }
+  }
+
+  return { success: false, error: new Error('Exceeded maximum schema retry attempts') };
+}
 
 export const FacilitiesManager: React.FC = () => {
   const { 
-    facilities, 
+    facilities: globalFacilities, 
     refreshFacilities, 
     isSuperAdmin, 
+    isBranchAdmin,
     canDelete, 
     notify,
-    getScopedFacilities
+    getScopedFacilities,
+    user: currentUser
   } = useAuth();
 
+  const [facilitiesList, setFacilitiesList] = useState<Facility[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedTypeFilter, setSelectedTypeFilter] = useState<string>('ALL');
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -57,8 +171,87 @@ export const FacilitiesManager: React.FC = () => {
   const [newRoleName, setNewRoleName] = useState('');
   const [newRoleDesc, setNewRoleDesc] = useState('');
 
-  const scopedFacilities = getScopedFacilities();
-  const parentBranches = facilities.filter(f => f.type === 'Branch' || f.isParent);
+  // ==========================================================================
+  // READ: Fetch facilities directly from Supabase on mount
+  // ==========================================================================
+  const fetchFacilities = async () => {
+    setLoading(true);
+    try {
+      if (supabase) {
+        let { data, error } = await supabase
+          .from('facilities')
+          .select('*')
+          .order('name', { ascending: true });
+
+        if (error) {
+          // If order by name failed, retry without order
+          const fallback = await supabase.from('facilities').select('*');
+          data = fallback.data;
+          error = fallback.error;
+        }
+
+        if (error) {
+          console.warn('Supabase fetch facilities notice:', error.message || error);
+          const fallbackData = await api.getFacilities();
+          setFacilitiesList(fallbackData);
+          return;
+        }
+
+        if (data && data.length > 0) {
+          const mapped = data.map(fromFacilityRow);
+          setFacilitiesList(mapped);
+          return;
+        } else {
+          // If Supabase facilities table is completely empty, seed initial default facilities
+          const initialApiFacilities = await api.getFacilities();
+          if (initialApiFacilities && initialApiFacilities.length > 0) {
+            for (const fac of initialApiFacilities) {
+              try {
+                const r = toFacilityRow(fac);
+                await safeSupabaseFacilityMutation('insert', { ...r, parent_id: null });
+              } catch (seedErr) {
+                console.warn('Initial facility seed notice:', seedErr);
+              }
+            }
+            // Re-fetch after seeding
+            const refreshed = await supabase.from('facilities').select('*');
+            if (refreshed.data && refreshed.data.length > 0) {
+              setFacilitiesList(refreshed.data.map(fromFacilityRow));
+              return;
+            }
+          }
+          setFacilitiesList([]);
+          return;
+        }
+      }
+
+      // Fallback when Supabase client is not configured
+      const data = await api.getFacilities();
+      setFacilitiesList(data);
+    } catch (err: any) {
+      console.error('Failed to fetch facilities:', err);
+      const fallback = await api.getFacilities();
+      setFacilitiesList(fallback);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchFacilities();
+  }, []);
+
+  // Parent Branches derived from current facilities list
+  const parentBranches = facilitiesList.filter(f => f.type === 'Branch' || f.isParent);
+
+  // Scoped list according to user RBAC
+  const userScopedFacilities = isSuperAdmin
+    ? facilitiesList
+    : isBranchAdmin && currentUser?.assignedFacilityIds?.length
+      ? facilitiesList.filter(f => currentUser.assignedFacilityIds?.includes(f.id) || f.id === currentUser.facilityId)
+      : currentUser?.facilityId
+        ? facilitiesList.filter(f => f.id === currentUser.facilityId)
+        : facilitiesList;
 
   const openAddModal = () => {
     setEditingFacility(null);
@@ -118,6 +311,9 @@ export const FacilitiesManager: React.FC = () => {
     setJobRoles(jobRoles.filter(r => r.id !== id));
   };
 
+  // ==========================================================================
+  // CREATE / UPDATE: Direct Supabase Mutation & State Synchronisation
+  // ==========================================================================
   const handleSaveFacility = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!code.trim() || !name.trim() || !responsibleOfficer.trim() || !officerEmail.trim()) {
@@ -125,11 +321,13 @@ export const FacilitiesManager: React.FC = () => {
       return;
     }
 
+    setIsSubmitting(true);
+
     const payload: Partial<Facility> = {
       code: code.trim(),
       name: name.trim(),
       type,
-      parentId: type === 'CSC' ? parentId || null : null,
+      parentId: type === 'CSC' ? (parentId || null) : null,
       parentName: type === 'CSC' ? parentBranches.find(b => b.id === parentId)?.name : undefined,
       isParent: type === 'Branch' ? true : isParent,
       location: location.trim(),
@@ -145,70 +343,105 @@ export const FacilitiesManager: React.FC = () => {
 
     try {
       if (editingFacility) {
-        // Execute Supabase update if client configured
+        // ------------------ UPDATE EXISTING FACILITY ------------------
+        const row = toFacilityRow(payload);
+
         if (supabase) {
-          try {
-            const { error: sbErr } = await supabase
-              .from('facilities')
-              .update(toFacilityRow(payload))
-              .eq('id', editingFacility.id);
-            if (sbErr) console.warn('Supabase facility update notice:', sbErr);
-          } catch (e) {
-            console.warn('Supabase facility update error:', e);
+          const result = await safeSupabaseFacilityMutation('update', row, editingFacility.id);
+          if (!result.success) {
+            const msg = result.error?.message || 'Failed to update facility in Supabase database';
+            notify(msg, 'error');
+            setIsSubmitting(false);
+            return;
           }
         }
 
-        await api.updateFacility(editingFacility.id, payload);
+        // Secondary sync to local server API for full consistency
+        try {
+          await api.updateFacility(editingFacility.id, payload);
+        } catch (apiErr) {
+          console.warn('Local API update warning:', apiErr);
+        }
+
+        // Update local UI state ONLY after successful DB operation
+        const updatedRecord: Facility = {
+          ...editingFacility,
+          ...payload,
+          id: editingFacility.id
+        } as Facility;
+
+        setFacilitiesList(prev => prev.map(f => f.id === editingFacility.id ? updatedRecord : f));
         notify(`Facility "${payload.name}" updated successfully!`, 'success');
       } else {
+        // ------------------ CREATE NEW FACILITY ------------------
         const newFacilityId = `fac-${Date.now().toString(36)}`;
-        const newRecord = {
+        const newRecord: Facility = {
           ...payload,
           id: newFacilityId
-        };
+        } as Facility;
 
-        // Execute Supabase insert if client configured
+        const row = toFacilityRow(newRecord);
+
         if (supabase) {
-          try {
-            const { error: sbErr } = await supabase
-              .from('facilities')
-              .insert([toFacilityRow(newRecord)]);
-            if (sbErr) console.warn('Supabase facility insert notice:', sbErr);
-          } catch (e) {
-            console.warn('Supabase facility insert error:', e);
+          const result = await safeSupabaseFacilityMutation('insert', row);
+          if (!result.success) {
+            const msg = result.error?.message || 'Failed to create facility in Supabase database';
+            notify(msg, 'error');
+            setIsSubmitting(false);
+            return;
           }
         }
 
-        await api.createFacility(newRecord);
+        // Secondary sync to local server API
+        try {
+          await api.createFacility(newRecord);
+        } catch (apiErr) {
+          console.warn('Local API insert warning:', apiErr);
+        }
+
+        // Update local UI state ONLY after successful DB operation
+        setFacilitiesList(prev => [...prev, newRecord]);
         notify(`New Facility "${payload.name}" created successfully!`, 'success');
       }
+
       setIsModalOpen(false);
       await refreshFacilities();
     } catch (err: any) {
       notify(err.message || 'Failed to save facility', 'error');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
+  // ==========================================================================
+  // DELETE: Direct Supabase Deletion & State Synchronisation
+  // ==========================================================================
   const handleDeleteFacility = async (id: string) => {
     if (!canDelete) {
       notify('You do not have permission to delete facility records.', 'error');
       return;
     }
+
     try {
       if (supabase) {
-        try {
-          const { error: sbErr } = await supabase
-            .from('facilities')
-            .delete()
-            .eq('id', id);
-          if (sbErr) console.warn('Supabase facility delete notice:', sbErr);
-        } catch (e) {
-          console.warn('Supabase facility delete error:', e);
+        const result = await safeSupabaseFacilityMutation('delete', {}, id);
+        if (!result.success) {
+          const msg = result.error?.message || 'Could not delete facility from Supabase database';
+          notify(msg, 'error');
+          return;
         }
       }
 
-      await api.deleteFacility(id);
-      notify('Facility record removed successfully', 'success');
+      // Secondary sync to local server API
+      try {
+        await api.deleteFacility(id);
+      } catch (apiErr) {
+        console.warn('Local API delete warning:', apiErr);
+      }
+
+      // Update local UI state ONLY after successful DB operation
+      setFacilitiesList(prev => prev.filter(f => f.id !== id));
+      notify('Facility record removed successfully from database', 'success');
       setDeleteConfirmId(null);
       await refreshFacilities();
     } catch (err: any) {
@@ -217,10 +450,12 @@ export const FacilitiesManager: React.FC = () => {
   };
 
   // Filtered List
-  const filteredFacilities = scopedFacilities.filter(f => {
-    const matchesSearch = f.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                          f.code.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                          f.responsibleOfficer.toLowerCase().includes(searchTerm.toLowerCase());
+  const filteredFacilities = userScopedFacilities.filter(f => {
+    const matchesSearch = 
+      f.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      f.code.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      f.responsibleOfficer.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      f.location.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesType = selectedTypeFilter === 'ALL' || f.type === selectedTypeFilter;
     return matchesSearch && matchesType;
   });
@@ -234,6 +469,12 @@ export const FacilitiesManager: React.FC = () => {
           <div className="flex items-center gap-2 text-xs font-bold text-blue-700 uppercase tracking-wider">
             <Building2 className="w-4 h-4" />
             <span>Operational Boundary & Organizational Hierarchy</span>
+            {isSupabaseConfigured && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                <Database className="w-3 h-3" />
+                Live Supabase Connected
+              </span>
+            )}
           </div>
           <h1 className="text-2xl font-black text-slate-900 mt-1">
             LECO Facilities & Customer Service Centres (CSC)
@@ -243,15 +484,26 @@ export const FacilitiesManager: React.FC = () => {
           </p>
         </div>
 
-        {isSuperAdmin && (
+        <div className="flex items-center gap-2.5">
           <button
-            onClick={openAddModal}
-            className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl shadow-sm transition flex items-center gap-2 shrink-0 cursor-pointer"
+            onClick={fetchFacilities}
+            disabled={loading}
+            className="p-2.5 text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-xl transition cursor-pointer disabled:opacity-50"
+            title="Refresh database records"
           >
-            <Plus className="w-4 h-4" />
-            <span>Add New Facility / CSC</span>
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
           </button>
-        )}
+
+          {isSuperAdmin && (
+            <button
+              onClick={openAddModal}
+              className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl shadow-sm transition flex items-center gap-2 shrink-0 cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Add New Facility / CSC</span>
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Filter and Search Bar */}
@@ -284,130 +536,149 @@ export const FacilitiesManager: React.FC = () => {
         </div>
       </div>
 
-      {/* Facilities Cards Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-        {filteredFacilities.map(fac => {
-          const isChildCSC = fac.type === 'CSC' && fac.parentId;
-          const childCount = facilities.filter(f => f.parentId === fac.id).length;
+      {/* Loading State */}
+      {loading ? (
+        <div className="bg-white border border-slate-200 rounded-2xl p-12 text-center shadow-sm">
+          <Loader2 className="w-8 h-8 text-emerald-600 animate-spin mx-auto mb-3" />
+          <h3 className="text-sm font-bold text-slate-800">Loading Facilities Data</h3>
+          <p className="text-xs text-slate-400 mt-1">Connecting to Supabase database...</p>
+        </div>
+      ) : filteredFacilities.length === 0 ? (
+        <div className="bg-white border border-slate-200 rounded-2xl p-12 text-center shadow-sm">
+          <Building2 className="w-10 h-10 text-slate-300 mx-auto mb-3" />
+          <h3 className="text-sm font-bold text-slate-800">No Facilities Found</h3>
+          <p className="text-xs text-slate-500 mt-1 max-w-sm mx-auto">
+            {searchTerm || selectedTypeFilter !== 'ALL' 
+              ? 'No facilities match the specified filter and search criteria.'
+              : 'No facilities registered in the database yet.'}
+          </p>
+        </div>
+      ) : (
+        /* Facilities Cards Grid */
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          {filteredFacilities.map(fac => {
+            const isChildCSC = fac.type === 'CSC' && fac.parentId;
+            const childCount = facilitiesList.filter(f => f.parentId === fac.id).length;
 
-          return (
-            <div 
-              key={fac.id}
-              className={`bg-white border rounded-2xl p-5 shadow-sm transition flex flex-col justify-between ${
-                fac.isParent ? 'border-blue-300 ring-1 ring-blue-100' : 'border-slate-200'
-              }`}
-            >
-              <div>
-                {/* Badge Top */}
-                <div className="flex items-center justify-between gap-2 mb-2">
-                  <span className="text-[10px] font-mono font-bold text-slate-400 uppercase bg-slate-100 px-2 py-0.5 rounded">
-                    {fac.code}
-                  </span>
-                  <div className="flex items-center gap-1.5">
-                    {fac.hasSolarPV && (
-                      <span className="flex items-center gap-1 text-[10px] font-bold bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-full border border-emerald-200">
-                        <Sun className="w-3 h-3" />
-                        {fac.solarCapacityKW} kW Solar
-                      </span>
-                    )}
-                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                      fac.type === 'Branch' ? 'bg-blue-100 text-blue-800' :
-                      fac.type === 'CSC' ? 'bg-amber-100 text-amber-800' :
-                      fac.type === 'Head Office' ? 'bg-purple-100 text-purple-800' :
-                      'bg-slate-100 text-slate-700'
-                    }`}>
-                      {fac.type}
+            return (
+              <div 
+                key={fac.id}
+                className={`bg-white border rounded-2xl p-5 shadow-sm transition flex flex-col justify-between ${
+                  fac.isParent ? 'border-blue-300 ring-1 ring-blue-100' : 'border-slate-200'
+                }`}
+              >
+                <div>
+                  {/* Badge Top */}
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <span className="text-[10px] font-mono font-bold text-slate-400 uppercase bg-slate-100 px-2 py-0.5 rounded">
+                      {fac.code}
                     </span>
-                  </div>
-                </div>
-
-                {/* Facility Name & Parent */}
-                <h3 className="text-base font-bold text-slate-900 tracking-tight">
-                  {fac.name}
-                </h3>
-                {isChildCSC && (
-                  <div className="text-[11px] text-blue-600 font-semibold flex items-center gap-1 mt-0.5">
-                    <span>Subordinate to: {fac.parentName || 'Parent Branch'}</span>
-                  </div>
-                )}
-                {fac.isParent && (
-                  <div className="text-[11px] text-emerald-700 font-semibold flex items-center gap-1 mt-0.5">
-                    <Layers className="w-3 h-3" />
-                    <span>Parent Branch &bull; {childCount} Assigned Customer Service Centres</span>
-                  </div>
-                )}
-
-                {/* Location & Officer Details */}
-                <div className="mt-3 space-y-1.5 text-xs text-slate-600 pt-3 border-t border-slate-100">
-                  <div className="flex items-start gap-2">
-                    <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0 mt-0.5" />
-                    <span className="truncate">{fac.location}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <UserCheck className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                    <span className="font-medium text-slate-800 truncate">{fac.responsibleOfficer}</span>
-                    {fac.headDesignation && <span className="text-slate-400 truncate">({fac.headDesignation})</span>}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Mail className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                    <span className="text-slate-500 font-mono text-[11px] truncate">{fac.officerEmail}</span>
-                  </div>
-                </div>
-
-                {/* Job Roles Chips */}
-                {fac.jobRoles && fac.jobRoles.length > 0 && (
-                  <div className="mt-3 pt-2.5 border-t border-slate-100">
-                    <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">
-                      Operational Roles ({fac.jobRoles.length})
-                    </div>
-                    <div className="flex flex-wrap gap-1">
-                      {fac.jobRoles.slice(0, 3).map((r, i) => (
-                        <span key={i} className="text-[10px] bg-slate-100 text-slate-700 px-2 py-0.5 rounded-md font-medium">
-                          {r.roleName}
-                        </span>
-                      ))}
-                      {fac.jobRoles.length > 3 && (
-                        <span className="text-[10px] text-slate-400 font-medium px-1">
-                          +{fac.jobRoles.length - 3} more
+                    <div className="flex items-center gap-1.5">
+                      {fac.hasSolarPV && (
+                        <span className="flex items-center gap-1 text-[10px] font-bold bg-emerald-50 text-emerald-700 px-2 py-0.5 rounded-full border border-emerald-200">
+                          <Sun className="w-3 h-3" />
+                          {fac.solarCapacityKW} kW Solar
                         </span>
                       )}
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                        fac.type === 'Branch' ? 'bg-blue-100 text-blue-800' :
+                        fac.type === 'CSC' ? 'bg-amber-100 text-amber-800' :
+                        fac.type === 'Head Office' ? 'bg-purple-100 text-purple-800' :
+                        'bg-slate-100 text-slate-700'
+                      }`}>
+                        {fac.type}
+                      </span>
                     </div>
                   </div>
-                )}
-              </div>
 
-              {/* Action Buttons */}
-              <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between">
-                <span className="text-[11px] text-slate-400 font-mono">
-                  Acc: {fac.electricityAccountNo || 'N/A'}
-                </span>
-
-                <div className="flex items-center gap-1.5">
-                  {isSuperAdmin && (
-                    <button
-                      onClick={() => openEditModal(fac)}
-                      className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition cursor-pointer"
-                      title="Edit Facility"
-                    >
-                      <Edit3 className="w-3.5 h-3.5" />
-                    </button>
+                  {/* Facility Name & Parent */}
+                  <h3 className="text-base font-bold text-slate-900 tracking-tight">
+                    {fac.name}
+                  </h3>
+                  {isChildCSC && (
+                    <div className="text-[11px] text-blue-600 font-semibold flex items-center gap-1 mt-0.5">
+                      <span>Subordinate to: {fac.parentName || parentBranches.find(b => b.id === fac.parentId)?.name || 'Parent Branch'}</span>
+                    </div>
+                  )}
+                  {fac.isParent && (
+                    <div className="text-[11px] text-emerald-700 font-semibold flex items-center gap-1 mt-0.5">
+                      <Layers className="w-3 h-3" />
+                      <span>Parent Branch &bull; {childCount} Assigned Customer Service Centres</span>
+                    </div>
                   )}
 
-                  {canDelete && isSuperAdmin && (
-                    <button
-                      onClick={() => setDeleteConfirmId(fac.id)}
-                      className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition cursor-pointer"
-                      title="Delete Facility"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                  {/* Location & Officer Details */}
+                  <div className="mt-3 space-y-1.5 text-xs text-slate-600 pt-3 border-t border-slate-100">
+                    <div className="flex items-start gap-2">
+                      <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0 mt-0.5" />
+                      <span className="truncate">{fac.location}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <UserCheck className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                      <span className="font-medium text-slate-800 truncate">{fac.responsibleOfficer}</span>
+                      {fac.headDesignation && <span className="text-slate-400 truncate">({fac.headDesignation})</span>}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Mail className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                      <span className="text-slate-500 font-mono text-[11px] truncate">{fac.officerEmail}</span>
+                    </div>
+                  </div>
+
+                  {/* Job Roles Chips */}
+                  {fac.jobRoles && fac.jobRoles.length > 0 && (
+                    <div className="mt-3 pt-2.5 border-t border-slate-100">
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">
+                        Operational Roles ({fac.jobRoles.length})
+                      </div>
+                      <div className="flex flex-wrap gap-1">
+                        {fac.jobRoles.slice(0, 3).map((r, i) => (
+                          <span key={i} className="text-[10px] bg-slate-100 text-slate-700 px-2 py-0.5 rounded-md font-medium">
+                            {r.roleName}
+                          </span>
+                        ))}
+                        {fac.jobRoles.length > 3 && (
+                          <span className="text-[10px] text-slate-400 font-medium px-1">
+                            +{fac.jobRoles.length - 3} more
+                          </span>
+                        )}
+                      </div>
+                    </div>
                   )}
                 </div>
+
+                {/* Action Buttons */}
+                <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between">
+                  <span className="text-[11px] text-slate-400 font-mono">
+                    Acc: {fac.electricityAccountNo || 'N/A'}
+                  </span>
+
+                  <div className="flex items-center gap-1.5">
+                    {isSuperAdmin && (
+                      <button
+                        onClick={() => openEditModal(fac)}
+                        className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition cursor-pointer"
+                        title="Edit Facility"
+                      >
+                        <Edit3 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+
+                    {canDelete && isSuperAdmin && (
+                      <button
+                        onClick={() => setDeleteConfirmId(fac.id)}
+                        className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition cursor-pointer"
+                        title="Delete Facility"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </div>
               </div>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      )}
 
       {/* Delete Confirmation Modal */}
       {deleteConfirmId && (
@@ -418,7 +689,7 @@ export const FacilitiesManager: React.FC = () => {
             </div>
             <h3 className="text-base font-bold text-slate-900">Confirm Facility Deletion</h3>
             <p className="text-xs text-slate-500 mt-2">
-              Are you sure you want to remove this facility? Any associated emission records and CSC links will be updated.
+              Are you sure you want to remove this facility from the Supabase database? Any associated emission records and CSC links will be updated.
             </p>
             <div className="mt-5 flex items-center justify-center gap-3">
               <button
@@ -755,16 +1026,19 @@ export const FacilitiesManager: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setIsModalOpen(false)}
-                className="px-4 py-2 bg-white hover:bg-slate-200 text-slate-700 font-semibold rounded-xl border border-slate-300 transition cursor-pointer"
+                disabled={isSubmitting}
+                className="px-4 py-2 bg-white hover:bg-slate-200 text-slate-700 font-semibold rounded-xl border border-slate-300 transition cursor-pointer disabled:opacity-50"
               >
                 Cancel
               </button>
               <button
                 type="submit"
                 form="facility-form"
-                className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl shadow transition cursor-pointer"
+                disabled={isSubmitting}
+                className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl shadow transition cursor-pointer flex items-center gap-2 disabled:opacity-50"
               >
-                {editingFacility ? 'Save Changes' : 'Create Facility'}
+                {isSubmitting && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                <span>{editingFacility ? 'Save Changes' : 'Create Facility'}</span>
               </button>
             </div>
 
@@ -775,3 +1049,4 @@ export const FacilitiesManager: React.FC = () => {
     </div>
   );
 };
+

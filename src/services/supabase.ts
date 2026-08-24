@@ -195,6 +195,7 @@ export function parseAssignedFacilityIds(val: any): string[] {
   }
   if (typeof val === 'string') {
     const trimmed = val.trim();
+    if (!trimmed || trimmed === '{}' || trimmed === '[]') return [];
     if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
       try {
         const parsed = JSON.parse(trimmed);
@@ -209,6 +210,9 @@ export function parseAssignedFacilityIds(val: any): string[] {
         .split(',')
         .map(s => s.replace(/^["']|["']$/g, '').trim())
         .filter(Boolean);
+    }
+    if (trimmed.includes(',')) {
+      return trimmed.split(',').map(s => s.trim()).filter(Boolean);
     }
     if (trimmed.length > 0) return [trimmed];
   }
@@ -258,7 +262,11 @@ export function fromUserProfileRow(row: any): User {
     role: row.role,
     facilityId: row.facility_id || row.facilityId,
     facilityName: row.facility_name || row.facilityName,
-    assignedFacilityIds: parseAssignedFacilityIds(row.assigned_facility_ids ?? row.assignedFacilityIds),
+    assignedFacilityIds: parseAssignedFacilityIds(
+      row.assigned_facility_ids ?? 
+      row.assignedFacilityIds ?? 
+      (row.role === 'branch_admin' && (row.facility_id || row.facilityId) ? [row.facility_id || row.facilityId] : [])
+    ),
     jobRole: row.job_role || row.jobRole,
     department: row.department,
     contactNumber: row.contact_number || row.contactNumber,
@@ -497,10 +505,19 @@ export async function safeSupabaseUpsertUser(
       }
     }
 
-    // 2. PostgREST missing column error: code PGRST204 or "Could not find the '...' column"
-    if (error.code === 'PGRST204' || error.message?.includes('Could not find the') || error.message?.includes('column of') || error.message?.includes('does not exist')) {
-      const match = error.message?.match(/Could not find the '([^']+)' column/) ||
-                    error.message?.match(/column [a-zA-Z0-9_.]*([a-zA-Z0-9_]+) does not exist/);
+    // 2. PostgREST missing column error: code PGRST204, 42703 or "column does not exist"
+    if (
+      error.code === 'PGRST204' || 
+      error.code === '42703' || 
+      error.message?.includes('Could not find the') || 
+      error.message?.includes('column') && error.message?.includes('does not exist')
+    ) {
+      const match = 
+        error.message?.match(/Could not find the '([^']+)' column/) ||
+        error.message?.match(/column "([^"]+)" of relation/) ||
+        error.message?.match(/column "([^"]+)" does not exist/) ||
+        error.message?.match(/column '([^']+)' does not exist/) ||
+        error.message?.match(/column ([a-zA-Z0-9_]+) does not exist/);
       const missingCol = match ? match[1] : null;
 
       if (missingCol && currentPayload[missingCol] !== undefined) {
@@ -509,17 +526,18 @@ export async function safeSupabaseUpsertUser(
         continue;
       }
 
-      // If regex did not extract, try removing non-core columns one by one
+      // If specific column was not cleanly identified, prune optional columns in safe order
+      // (preserving core RBAC and assigned_facility_ids as much as possible)
       const optionalCols = [
-        'allowed_modules',
-        'assigned_facility_ids',
-        'can_delete',
-        'facility_name',
-        'job_role',
-        'department',
         'contact_number',
+        'department',
+        'job_role',
+        'facility_name',
+        'can_delete',
         'is_active',
-        'auth_user_id'
+        'allowed_modules',
+        'auth_user_id',
+        'assigned_facility_ids'
       ];
       const nextCol = optionalCols.find(col => currentPayload[col] !== undefined);
       if (nextCol) {
