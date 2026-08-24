@@ -27,15 +27,28 @@ export async function signInWithSupabaseAuth(email: string, password?: string) {
   return data;
 }
 
+// Ephemeral client for administrative user creation without mutating the active administrator session
+export function getSupabaseAuthClient() {
+  if (!supabaseUrl || !supabaseAnonKey) return null;
+  return createClient(supabaseUrl, supabaseAnonKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+      detectSessionInUrl: false
+    }
+  });
+}
+
 export async function signUpWithSupabaseAuth(email: string, password?: string, metadata?: any) {
-  if (!supabase) {
-    throw new Error('Supabase client is not configured.');
+  const authClient = getSupabaseAuthClient() || supabase;
+  if (!authClient) {
+    throw new Error('Supabase client is not configured with environment variables.');
   }
   const cleanEmail = email.trim().toLowerCase();
   const pwd = password?.trim() || 'Sadmin@cf369';
   
   try {
-    const { data, error } = await supabase.auth.signUp({
+    const { data, error } = await authClient.auth.signUp({
       email: cleanEmail,
       password: pwd,
       options: {
@@ -66,7 +79,7 @@ export async function signUpWithSupabaseAuth(email: string, password?: string, m
     // Check if error is network/fetch related
     const msg = err?.message || String(err);
     if (msg.includes('Failed to fetch') || msg.includes('NetworkError') || msg.includes('fetch failed')) {
-      const networkErr: any = new Error(`Supabase Auth endpoint unreachable (Failed to fetch).`);
+      const networkErr: any = new Error(`Supabase Auth endpoint unreachable (Failed to fetch). Please check your internet connection or Supabase URL.`);
       networkErr.isNetworkError = true;
       networkErr.originalError = err;
       throw networkErr;

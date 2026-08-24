@@ -363,41 +363,45 @@ export const UserManager: React.FC = () => {
               authUserId = authRes.user.id;
             }
           } catch (sbAuthErr: any) {
-            console.warn('Supabase Auth user creation notice:', sbAuthErr);
+            console.error('Supabase Auth user creation error:', sbAuthErr);
             const rawMsg = sbAuthErr?.message || String(sbAuthErr || '');
             
-            // 1. Duplicate user registration
+            // Duplicate user registration in Supabase Auth
             if (
               rawMsg.toLowerCase().includes('already registered') ||
               rawMsg.toLowerCase().includes('already exists') ||
               sbAuthErr.code === 'user_already_exists' ||
               sbAuthErr.status === 422
             ) {
-              notify(`Authentication Error: A user with email "${cleanEmail}" is already registered in Supabase Authentication.`, 'error');
+              notify(`Authentication Error: A user with email "${cleanEmail}" already exists in Supabase Authentication.`, 'error');
               setIsSubmitting(false);
               return;
             } 
-            // 2. Password validation failure
+            // Password validation failure
             else if (rawMsg.toLowerCase().includes('password')) {
-              notify(`Authentication Error: ${rawMsg}`, 'error');
+              notify(`Authentication Password Error: ${rawMsg}`, 'error');
               setIsSubmitting(false);
               return;
-            } 
-            // 3. Network or endpoint unreachable ("Failed to fetch")
+            }
+            // Invalid email format
+            else if (rawMsg.toLowerCase().includes('email')) {
+              notify(`Authentication Email Error: ${rawMsg}`, 'error');
+              setIsSubmitting(false);
+              return;
+            }
+            // Network connection error
             else if (
               sbAuthErr.isNetworkError ||
               rawMsg.toLowerCase().includes('failed to fetch') ||
-              rawMsg.toLowerCase().includes('network') ||
-              rawMsg.toLowerCase().includes('fetch')
+              rawMsg.toLowerCase().includes('network')
             ) {
-              console.warn('[UserManager] Supabase Auth endpoint unreachable (Failed to fetch). Continuing with profile creation in database.');
-              notify('Supabase Auth endpoint is currently unreachable via network. Creating user profile in database and local cache.', 'info');
-              // Proceed without halting so the user profile is created
+              notify(`Supabase Auth Connection Warning: Could not reach auth server (${rawMsg}). Creating profile with local credentials.`, 'warning');
             } 
-            // 4. Other Auth errors
+            // Generic Auth failure
             else {
-              console.warn(`Supabase Auth issue: ${rawMsg}. Continuing with profile creation.`);
-              notify(`Supabase Auth Notice: ${rawMsg}. Profile created in database.`, 'info');
+              notify(`Supabase Auth Error: ${rawMsg}`, 'error');
+              setIsSubmitting(false);
+              return;
             }
           }
         }
@@ -415,6 +419,12 @@ export const UserManager: React.FC = () => {
 
         if (supabase) {
           const row = toSupabaseUserRow(newRecord);
+          // Ensure both primary key id and foreign key auth_user_id are assigned
+          if (authUserId) {
+            row.id = authUserId;
+            row.auth_user_id = authUserId;
+          }
+
           const result = await safeSupabaseUpsertUser('insert', row);
 
           if (!result.success && result.error) {
@@ -425,10 +435,11 @@ export const UserManager: React.FC = () => {
               rawMsg.toLowerCase().includes('fetch');
 
             if (isNetErr) {
-              console.warn('[UserManager] Supabase user_profile insert endpoint unreachable (Failed to fetch). Saving in local database.');
+              console.warn('[UserManager] Supabase user_profile insert unreachable. Saved in local cache.');
+              notify(`Database insert notice: Could not reach Supabase. User saved in local system.`, 'info');
             } else {
               console.error('Supabase user_profile insert failed:', result.error);
-              notify(`Database profile insert failed: ${result.error.message || result.error}`, 'error');
+              notify(`Database Profile Insert Failed: ${result.error.message || result.error}`, 'error');
               setIsSubmitting(false);
               return;
             }
@@ -443,7 +454,11 @@ export const UserManager: React.FC = () => {
 
         // Synchronize in-memory cache/api
         await api.createUser(newRecord);
-        notify(`Officer user account "${payload.name}" created successfully!`, 'success');
+        if (authUserId) {
+          notify(`Officer account "${payload.name}" successfully created in Supabase Auth & user_profiles database!`, 'success');
+        } else {
+          notify(`Officer user account "${payload.name}" created successfully!`, 'success');
+        }
       }
 
       // Only close modal and refresh state AFTER successful operation
