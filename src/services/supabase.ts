@@ -125,20 +125,35 @@ export async function testSupabaseConnection(): Promise<{ success: boolean; mess
 
 export function toFacilityRow(fac: Partial<Facility>): Record<string, any> {
   const row: Record<string, any> = {};
-  if (fac.id !== undefined) row.id = fac.id;
-  if (fac.code !== undefined) row.code = fac.code;
-  if (fac.name !== undefined) row.name = fac.name;
+  if (fac.id !== undefined) {
+    if (isValidUUID(fac.id)) {
+      row.id = fac.id;
+    } else if (typeof fac.id === 'string' && fac.id.trim().length > 0) {
+      row.id = fac.id.trim();
+    }
+  }
+  if (fac.code !== undefined) row.code = fac.code?.trim();
+  if (fac.name !== undefined) row.name = fac.name?.trim();
   if (fac.type !== undefined) row.type = fac.type;
-  if (fac.parentId !== undefined) row.parent_id = fac.parentId;
-  if (fac.isParent !== undefined) row.is_parent = fac.isParent;
-  if (fac.location !== undefined) row.location = fac.location;
-  if (fac.responsibleOfficer !== undefined) row.responsible_officer = fac.responsibleOfficer;
-  if (fac.headDesignation !== undefined) row.head_designation = fac.headDesignation;
-  if (fac.officerEmail !== undefined) row.officer_email = fac.officerEmail;
-  if (fac.contactNumber !== undefined) row.contact_number = fac.contactNumber;
-  if (fac.electricityAccountNo !== undefined) row.electricity_account_no = fac.electricityAccountNo;
-  if (fac.hasSolarPV !== undefined) row.has_solar_pv = fac.hasSolarPV;
-  if (fac.solarCapacityKW !== undefined) row.solar_capacity_kw = fac.solarCapacityKW;
+  
+  if (fac.parentId !== undefined) {
+    const pid = fac.parentId;
+    if (!pid || pid === 'null' || pid === 'none' || pid === 'undefined' || (typeof pid === 'string' && pid.trim() === '')) {
+      row.parent_id = null;
+    } else {
+      row.parent_id = typeof pid === 'string' ? pid.trim() : pid;
+    }
+  }
+
+  if (fac.isParent !== undefined) row.is_parent = Boolean(fac.isParent);
+  if (fac.location !== undefined) row.location = fac.location?.trim();
+  if (fac.responsibleOfficer !== undefined) row.responsible_officer = fac.responsibleOfficer?.trim();
+  if (fac.headDesignation !== undefined) row.head_designation = fac.headDesignation?.trim() || null;
+  if (fac.officerEmail !== undefined) row.officer_email = fac.officerEmail?.trim()?.toLowerCase();
+  if (fac.contactNumber !== undefined) row.contact_number = fac.contactNumber?.trim() || null;
+  if (fac.electricityAccountNo !== undefined) row.electricity_account_no = fac.electricityAccountNo?.trim() || null;
+  if (fac.hasSolarPV !== undefined) row.has_solar_pv = Boolean(fac.hasSolarPV);
+  if (fac.solarCapacityKW !== undefined) row.solar_capacity_kw = Number(fac.solarCapacityKW) || 0;
   if (fac.jobRoles !== undefined) row.job_roles = fac.jobRoles;
   return row;
 }
@@ -280,7 +295,9 @@ export function fromUserProfileRow(row: any): User {
 
 export function toScope1Row(rec: Partial<Scope1Record>): Record<string, any> {
   const row: Record<string, any> = {};
-  if (rec.id !== undefined) row.id = rec.id;
+  if (rec.id !== undefined) {
+    row.id = isValidUUID(rec.id) ? rec.id : (rec.id ? generateUUID() : undefined);
+  }
   if (rec.facilityId !== undefined) row.facility_id = rec.facilityId;
   if (rec.facilityName !== undefined) row.facility_name = rec.facilityName;
   if (rec.reportingYear !== undefined) row.reporting_year = Number(rec.reportingYear);
@@ -299,7 +316,9 @@ export function toScope1Row(rec: Partial<Scope1Record>): Record<string, any> {
   if (rec.emissionFactorUsed !== undefined) row.emission_factor_used = rec.emissionFactorUsed;
   if (rec.emissionsTonsCO2e !== undefined) row.emissions_tons_co2e = Number(rec.emissionsTonsCO2e);
   if (rec.notes !== undefined) row.notes = rec.notes;
-  if (rec.createdById !== undefined) row.created_by_id = rec.createdById;
+  if (rec.createdById !== undefined) {
+    row.created_by_id = isValidUUID(rec.createdById) ? rec.createdById : null;
+  }
   if (rec.createdByName !== undefined) row.created_by_name = rec.createdByName;
   return row;
 }
@@ -333,7 +352,9 @@ export function fromScope1Row(row: any): Scope1Record {
 
 export function toScope2Row(rec: Partial<Scope2Record>): Record<string, any> {
   const row: Record<string, any> = {};
-  if (rec.id !== undefined) row.id = rec.id;
+  if (rec.id !== undefined) {
+    row.id = isValidUUID(rec.id) ? rec.id : (rec.id ? generateUUID() : undefined);
+  }
   if (rec.facilityId !== undefined) row.facility_id = rec.facilityId;
   if (rec.facilityName !== undefined) row.facility_name = rec.facilityName;
   if (rec.reportingYear !== undefined) row.reporting_year = Number(rec.reportingYear);
@@ -348,7 +369,9 @@ export function toScope2Row(rec: Partial<Scope2Record>): Record<string, any> {
   if (rec.netEmissionsTonsCO2e !== undefined) row.net_emissions_tons_co2e = Number(rec.netEmissionsTonsCO2e);
   if (rec.costLKR !== undefined) row.cost_lkr = Number(rec.costLKR);
   if (rec.notes !== undefined) row.notes = rec.notes;
-  if (rec.createdById !== undefined) row.created_by_id = rec.createdById;
+  if (rec.createdById !== undefined) {
+    row.created_by_id = isValidUUID(rec.createdById) ? rec.createdById : null;
+  }
   if (rec.createdByName !== undefined) row.created_by_name = rec.createdByName;
   return row;
 }
@@ -378,7 +401,9 @@ export function fromScope2Row(row: any): Scope2Record {
 
 export function toScope3Row(rec: Partial<Scope3Record>): Record<string, any> {
   const row: Record<string, any> = {};
-  if (rec.id !== undefined) row.id = rec.id;
+  if (rec.id !== undefined) {
+    row.id = isValidUUID(rec.id) ? rec.id : (rec.id ? generateUUID() : undefined);
+  }
   if (rec.facilityId !== undefined) row.facility_id = rec.facilityId;
   if (rec.facilityName !== undefined) row.facility_name = rec.facilityName;
   if (rec.reportingYear !== undefined) row.reporting_year = Number(rec.reportingYear);
@@ -391,7 +416,9 @@ export function toScope3Row(rec: Partial<Scope3Record>): Record<string, any> {
   if (rec.emissionFactorUsed !== undefined) row.emission_factor_used = Number(rec.emissionFactorUsed);
   if (rec.emissionsTonsCO2e !== undefined) row.emissions_tons_co2e = Number(rec.emissionsTonsCO2e);
   if (rec.notes !== undefined) row.notes = rec.notes;
-  if (rec.createdById !== undefined) row.created_by_id = rec.createdById;
+  if (rec.createdById !== undefined) {
+    row.created_by_id = isValidUUID(rec.createdById) ? rec.createdById : null;
+  }
   if (rec.createdByName !== undefined) row.created_by_name = rec.createdByName;
   return row;
 }
@@ -582,3 +609,175 @@ export async function safeSupabaseUpsertUser(
 
   return { success: false, error: new Error('Exceeded maximum schema fallback retries') };
 }
+
+/**
+ * Schema-Safe Supabase Facility Mutation Helper.
+ * Handles UUID vs TEXT ID types (22P02), foreign key constraints on parent_id (23503),
+ * unique code collisions (23505), and missing table columns (PGRST204, 42703).
+ */
+export async function safeSupabaseFacilityMutation(
+  operation: 'insert' | 'update' | 'delete',
+  payload: Record<string, any>,
+  facilityId?: string
+): Promise<{ success: boolean; data?: any; error?: any; isNetworkError?: boolean }> {
+  if (!supabase) {
+    return { success: false, error: new Error('Supabase client is not configured') };
+  }
+
+  if (operation === 'delete') {
+    if (!facilityId) return { success: false, error: new Error('Facility ID required for deletion') };
+    try {
+      const { error } = await supabase.from('facilities').delete().eq('id', facilityId);
+      if (error) {
+        return { success: false, error };
+      }
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err };
+    }
+  }
+
+  let currentPayload: Record<string, any> = { ...payload };
+
+  // Sanitize parent_id: Convert empty strings or invalid values to null
+  if (
+    currentPayload.parent_id === '' || 
+    currentPayload.parent_id === 'null' || 
+    currentPayload.parent_id === 'none' ||
+    currentPayload.parent_id === 'undefined'
+  ) {
+    currentPayload.parent_id = null;
+  }
+
+  // If inserting, ensure id is a valid UUID or generate one
+  if (operation === 'insert') {
+    if (!currentPayload.id || !isValidUUID(currentPayload.id)) {
+      currentPayload.id = generateUUID();
+    }
+  }
+
+  const maxRetries = 8;
+  let attempt = 0;
+
+  while (attempt < maxRetries) {
+    attempt++;
+    let queryResult: any;
+
+    try {
+      if (operation === 'insert') {
+        queryResult = await supabase.from('facilities').insert([currentPayload]).select().maybeSingle();
+      } else {
+        const idToUpdate = facilityId || currentPayload.id;
+        queryResult = await supabase.from('facilities').update(currentPayload).eq('id', idToUpdate).select().maybeSingle();
+      }
+    } catch (err: any) {
+      queryResult = { error: err };
+    }
+
+    const { data, error } = queryResult;
+
+    if (!error) {
+      return { success: true, data: data ? fromFacilityRow(data) : undefined };
+    }
+
+    // 0. Network error
+    const errorMsg = error.message || String(error || '');
+    if (
+      errorMsg.includes('Failed to fetch') ||
+      errorMsg.includes('NetworkError') ||
+      errorMsg.includes('fetch failed')
+    ) {
+      return { success: false, isNetworkError: true, error };
+    }
+
+    // 1. UUID syntax error (22P02): "invalid input syntax for type uuid"
+    if (error.code === '22P02' || error.message?.includes('invalid input syntax for type uuid')) {
+      console.warn('[Supabase Facilities Safe] UUID syntax error (22P02):', error.message);
+      
+      // If currentPayload.id is not a valid UUID, generate a valid UUID
+      if (currentPayload.id && !isValidUUID(currentPayload.id)) {
+        currentPayload.id = generateUUID();
+        continue;
+      }
+
+      // If parent_id is not a valid UUID, set to null
+      if (currentPayload.parent_id && !isValidUUID(currentPayload.parent_id)) {
+        console.warn('[Supabase Facilities Safe] Non-UUID parent_id converted to null:', currentPayload.parent_id);
+        currentPayload.parent_id = null;
+        continue;
+      }
+
+      // On insert, try deleting currentPayload.id to let PostgreSQL DEFAULT gen_random_uuid() take over
+      if (operation === 'insert' && currentPayload.id) {
+        delete currentPayload.id;
+        continue;
+      }
+    }
+
+    // 2. Foreign key violation (23503) on parent_id
+    if (error.code === '23503' || error.message?.includes('foreign key') || error.message?.includes('violates foreign key')) {
+      if (currentPayload.parent_id) {
+        console.warn('[Supabase Facilities Safe] Foreign key violation on parent_id. Setting parent_id = null');
+        currentPayload.parent_id = null;
+        continue;
+      }
+    }
+
+    // 3. Unique violation (23505) on code or id
+    if (error.code === '23505' || error.message?.includes('duplicate key') || error.message?.includes('unique constraint')) {
+      if (error.message?.includes('facilities_pkey') || error.message?.includes('id')) {
+        currentPayload.id = generateUUID();
+        continue;
+      }
+      if (error.message?.includes('code')) {
+        currentPayload.code = `${currentPayload.code || 'FAC'}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+        continue;
+      }
+    }
+
+    // 4. Missing column error (PGRST204 / 42703)
+    if (
+      error.code === 'PGRST204' || 
+      error.code === '42703' || 
+      error.message?.includes('Could not find the') || 
+      (error.message?.includes('column') && error.message?.includes('does not exist'))
+    ) {
+      const match = 
+        error.message?.match(/Could not find the '([^']+)' column/) ||
+        error.message?.match(/column "([^"]+)" of relation/) ||
+        error.message?.match(/column "([^"]+)" does not exist/) ||
+        error.message?.match(/column '([^']+)' does not exist/) ||
+        error.message?.match(/column ([a-zA-Z0-9_]+) does not exist/);
+      const missingCol = match ? match[1] : null;
+
+      if (missingCol && currentPayload[missingCol] !== undefined) {
+        console.warn(`[Supabase Facilities Safe] Pruning missing column '${missingCol}' and retrying`);
+        delete currentPayload[missingCol];
+        continue;
+      }
+
+      // Safe pruning of optional columns
+      const optionalCols = [
+        'job_roles',
+        'solar_capacity_kw',
+        'has_solar_pv',
+        'electricity_account_no',
+        'contact_number',
+        'head_designation',
+        'parent_name',
+        'parent_id'
+      ];
+      const nextCol = optionalCols.find(col => currentPayload[col] !== undefined);
+      if (nextCol) {
+        console.warn(`[Supabase Facilities Safe] Pruning optional column '${nextCol}' and retrying`);
+        delete currentPayload[nextCol];
+        continue;
+      }
+    }
+
+    return { success: false, error };
+  }
+
+  return { success: false, error: new Error('Exceeded maximum schema retry attempts for facility mutation') };
+}
+

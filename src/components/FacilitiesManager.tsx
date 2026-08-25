@@ -6,7 +6,10 @@ import {
   supabase, 
   toFacilityRow, 
   fromFacilityRow, 
-  isSupabaseConfigured 
+  isSupabaseConfigured,
+  safeSupabaseFacilityMutation,
+  generateUUID,
+  isValidUUID
 } from '../services/supabase';
 import { 
   Building2, 
@@ -30,107 +33,6 @@ import {
   Database,
   Loader2
 } from 'lucide-react';
-
-/**
- * Robust Supabase facility upsert helper.
- * Handles schema column discrepancies (PGRST204), foreign key constraints (23503),
- * and duplicate code handling (23505).
- */
-async function safeSupabaseFacilityMutation(
-  operation: 'insert' | 'update' | 'delete',
-  payload: Record<string, any>,
-  facilityId?: string
-): Promise<{ success: boolean; data?: any; error?: any }> {
-  if (!supabase) {
-    return { success: false, error: new Error('Supabase client is not configured') };
-  }
-
-  if (operation === 'delete') {
-    if (!facilityId) return { success: false, error: new Error('Facility ID required for deletion') };
-    const { error } = await supabase.from('facilities').delete().eq('id', facilityId);
-    if (error) return { success: false, error };
-    return { success: true };
-  }
-
-  let currentPayload = { ...payload };
-  const maxRetries = 8;
-  let attempt = 0;
-
-  while (attempt < maxRetries) {
-    attempt++;
-    let result: any;
-
-    try {
-      if (operation === 'insert') {
-        result = await supabase.from('facilities').insert([currentPayload]).select().maybeSingle();
-      } else {
-        const idToUpdate = facilityId || currentPayload.id;
-        result = await supabase.from('facilities').update(currentPayload).eq('id', idToUpdate).select().maybeSingle();
-      }
-
-      const { data, error } = result;
-
-      if (!error) {
-        return { success: true, data: data ? fromFacilityRow(data) : undefined };
-      }
-
-      // Handle missing column errors: PGRST204 or column does not exist
-      if (
-        error.code === 'PGRST204' || 
-        error.code === '42703' || 
-        error.message?.includes('Could not find the') || 
-        (error.message?.includes('column') && error.message?.includes('does not exist'))
-      ) {
-        const match = 
-          error.message?.match(/Could not find the '([^']+)' column/) ||
-          error.message?.match(/column "([^"]+)" of relation/) ||
-          error.message?.match(/column "([^"]+)" does not exist/) ||
-          error.message?.match(/column '([^']+)' does not exist/) ||
-          error.message?.match(/column ([a-zA-Z0-9_]+) does not exist/);
-        const missingCol = match ? match[1] : null;
-
-        if (missingCol && currentPayload[missingCol] !== undefined) {
-          console.warn(`[Supabase Facilities] Pruning missing column '${missingCol}' and retrying`);
-          delete currentPayload[missingCol];
-          continue;
-        }
-
-        // Fallback pruning of optional columns in safe order
-        const optionalCols = [
-          'job_roles',
-          'solar_capacity_kw',
-          'has_solar_pv',
-          'electricity_account_no',
-          'contact_number',
-          'head_designation',
-          'parent_name',
-          'parent_id'
-        ];
-        const nextCol = optionalCols.find(col => currentPayload[col] !== undefined);
-        if (nextCol) {
-          console.warn(`[Supabase Facilities] Pruning optional column '${nextCol}' and retrying`);
-          delete currentPayload[nextCol];
-          continue;
-        }
-      }
-
-      // Handle foreign key constraint error (23503) on parent_id
-      if (error.code === '23503' || error.message?.includes('foreign key') || error.message?.includes('violates foreign key')) {
-        if (currentPayload.parent_id) {
-          console.warn('[Supabase Facilities] Foreign key violation on parent_id. Setting parent_id = null');
-          currentPayload.parent_id = null;
-          continue;
-        }
-      }
-
-      return { success: false, error };
-    } catch (err: any) {
-      return { success: false, error: err };
-    }
-  }
-
-  return { success: false, error: new Error('Exceeded maximum schema retry attempts') };
-}
 
 export const FacilitiesManager: React.FC = () => {
   const { 
@@ -323,19 +225,21 @@ export const FacilitiesManager: React.FC = () => {
 
     setIsSubmitting(true);
 
+    const cleanParentId = (type === 'CSC' && parentId && parentId !== 'null' && parentId !== 'none') ? parentId.trim() : null;
+
     const payload: Partial<Facility> = {
       code: code.trim(),
       name: name.trim(),
       type,
-      parentId: type === 'CSC' ? (parentId || null) : null,
-      parentName: type === 'CSC' ? parentBranches.find(b => b.id === parentId)?.name : undefined,
+      parentId: cleanParentId,
+      parentName: cleanParentId ? parentBranches.find(b => b.id === cleanParentId)?.name : undefined,
       isParent: type === 'Branch' ? true : isParent,
       location: location.trim(),
       responsibleOfficer: responsibleOfficer.trim(),
-      headDesignation: headDesignation.trim(),
+      headDesignation: headDesignation.trim() || undefined,
       officerEmail: officerEmail.trim().toLowerCase(),
-      contactNumber: contactNumber.trim(),
-      electricityAccountNo: electricityAccountNo.trim(),
+      contactNumber: contactNumber.trim() || undefined,
+      electricityAccountNo: electricityAccountNo.trim() || undefined,
       hasSolarPV,
       solarCapacityKW: hasSolarPV ? Number(solarCapacityKW) : 0,
       jobRoles
@@ -344,7 +248,7 @@ export const FacilitiesManager: React.FC = () => {
     try {
       if (editingFacility) {
         // ------------------ UPDATE EXISTING FACILITY ------------------
-        const row = toFacilityRow(payload);
+        const row = toFacilityRow({ ...payload, id: editingFacility.id });
 
         if (supabase) {
           const result = await safeSupabaseFacilityMutation('update', row, editingFacility.id);
@@ -374,8 +278,9 @@ export const FacilitiesManager: React.FC = () => {
         notify(`Facility "${payload.name}" updated successfully!`, 'success');
       } else {
         // ------------------ CREATE NEW FACILITY ------------------
-        const newFacilityId = `fac-${Date.now().toString(36)}`;
-        const newRecord: Facility = {
+        // Use a valid UUID to ensure compatibility with UUID columns as well as TEXT columns in Supabase Postgres
+        const newFacilityId = generateUUID();
+        let newRecord: Facility = {
           ...payload,
           id: newFacilityId
         } as Facility;
@@ -389,6 +294,12 @@ export const FacilitiesManager: React.FC = () => {
             notify(msg, 'error');
             setIsSubmitting(false);
             return;
+          }
+          if (result.data?.id) {
+            newRecord = {
+              ...newRecord,
+              id: result.data.id
+            };
           }
         }
 

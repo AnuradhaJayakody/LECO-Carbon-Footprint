@@ -14,6 +14,7 @@ import {
   toUserProfileRow, 
   fromUserProfileRow,
   safeSupabaseUpsertUser,
+  safeSupabaseFacilityMutation,
   toScope1Row,
   fromScope1Row,
   toScope2Row,
@@ -110,16 +111,9 @@ export const api = {
     if (supabase) {
       try {
         const row = toFacilityRow(fac);
-        const { data, error } = await supabase
-          .from('facilities')
-          .insert([row])
-          .select()
-          .single();
-
-        if (error) {
-          console.warn('Supabase insert facility warning:', error);
-        } else if (data) {
-          createdFacility = fromFacilityRow(data);
+        const result = await safeSupabaseFacilityMutation('insert', row);
+        if (result.success && result.data) {
+          createdFacility = result.data;
         }
       } catch (err) {
         console.warn('Supabase createFacility exception:', err);
@@ -144,17 +138,9 @@ export const api = {
     if (supabase) {
       try {
         const row = toFacilityRow(updates);
-        const { data, error } = await supabase
-          .from('facilities')
-          .update(row)
-          .eq('id', id)
-          .select()
-          .single();
-
-        if (error) {
-          console.warn('Supabase update facility warning:', error);
-        } else if (data) {
-          updatedFacility = fromFacilityRow(data);
+        const result = await safeSupabaseFacilityMutation('update', row, id);
+        if (result.success && result.data) {
+          updatedFacility = result.data;
         }
       } catch (err) {
         console.warn('Supabase updateFacility exception:', err);
@@ -176,14 +162,7 @@ export const api = {
   deleteFacility: async (id: string): Promise<{ success: boolean }> => {
     if (supabase) {
       try {
-        const { error } = await supabase
-          .from('facilities')
-          .delete()
-          .eq('id', id);
-
-        if (error) {
-          console.warn('Supabase delete facility warning:', error);
-        }
+        await safeSupabaseFacilityMutation('delete', {}, id);
       } catch (err) {
         console.warn('Supabase deleteFacility exception:', err);
       }
