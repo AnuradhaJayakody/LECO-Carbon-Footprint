@@ -128,7 +128,7 @@ export function toFacilityRow(fac: Partial<Facility>): Record<string, any> {
   if (fac.id !== undefined) {
     if (isValidUUID(fac.id)) {
       row.id = fac.id;
-    } else if (typeof fac.id === 'string' && fac.id.trim().length > 0) {
+    } else if (typeof fac.id === 'string' && fac.id.trim().length > 0 && !fac.id.startsWith('fac-')) {
       row.id = fac.id.trim();
     }
   }
@@ -139,9 +139,12 @@ export function toFacilityRow(fac: Partial<Facility>): Record<string, any> {
   if (fac.parentId !== undefined) {
     const pid = fac.parentId;
     if (!pid || pid === 'null' || pid === 'none' || pid === 'undefined' || (typeof pid === 'string' && pid.trim() === '')) {
+      row.parent_facility_id = null;
       row.parent_id = null;
     } else {
-      row.parent_id = typeof pid === 'string' ? pid.trim() : pid;
+      const cleanPid = typeof pid === 'string' ? pid.trim() : pid;
+      row.parent_facility_id = cleanPid;
+      row.parent_id = cleanPid;
     }
   }
 
@@ -164,7 +167,7 @@ export function fromFacilityRow(row: any): Facility {
     code: row.code || '',
     name: row.name || '',
     type: row.type || 'CSC',
-    parentId: row.parent_id || row.parentId || null,
+    parentId: row.parent_facility_id || row.parent_id || row.parentId || null,
     parentName: row.parent_name || row.parentName,
     isParent: Boolean(row.is_parent ?? row.isParent),
     location: row.location || '',
@@ -639,20 +642,29 @@ export async function safeSupabaseFacilityMutation(
 
   let currentPayload: Record<string, any> = { ...payload };
 
-  // Sanitize parent_id: Convert empty strings or invalid values to null
-  if (
-    currentPayload.parent_id === '' || 
-    currentPayload.parent_id === 'null' || 
-    currentPayload.parent_id === 'none' ||
-    currentPayload.parent_id === 'undefined'
-  ) {
-    currentPayload.parent_id = null;
-  }
+  // Sanitize parent_facility_id and parent_id: Convert empty strings or invalid values to null
+  ['parent_facility_id', 'parent_id'].forEach(key => {
+    if (key in currentPayload) {
+      const val = currentPayload[key];
+      if (
+        val === '' || 
+        val === 'null' || 
+        val === 'none' || 
+        val === 'undefined' ||
+        val === undefined ||
+        (typeof val === 'string' && val.trim() === '')
+      ) {
+        currentPayload[key] = null;
+      } else if (typeof val === 'string') {
+        currentPayload[key] = val.trim();
+      }
+    }
+  });
 
-  // If inserting, ensure id is a valid UUID or generate one
+  // On INSERT: Omit local ID if it's not a valid UUID (e.g. mock "fac-xxx") so Supabase/PostgreSQL auto-generates a valid UUID
   if (operation === 'insert') {
     if (!currentPayload.id || !isValidUUID(currentPayload.id)) {
-      currentPayload.id = generateUUID();
+      delete currentPayload.id;
     }
   }
 
@@ -694,36 +706,49 @@ export async function safeSupabaseFacilityMutation(
     if (error.code === '22P02' || error.message?.includes('invalid input syntax for type uuid')) {
       console.warn('[Supabase Facilities Safe] UUID syntax error (22P02):', error.message);
       
-      // If currentPayload.id is not a valid UUID, generate a valid UUID
-      if (currentPayload.id && !isValidUUID(currentPayload.id)) {
-        currentPayload.id = generateUUID();
+      // On insert, delete currentPayload.id so PostgreSQL DEFAULT gen_random_uuid() takes over
+      if (operation === 'insert' && currentPayload.id && !isValidUUID(currentPayload.id)) {
+        delete currentPayload.id;
         continue;
       }
 
-      // If parent_id is not a valid UUID, set to null
+      // If parent_facility_id or parent_id is not a valid UUID, set to null
+      if (currentPayload.parent_facility_id && !isValidUUID(currentPayload.parent_facility_id)) {
+        console.warn('[Supabase Facilities Safe] Non-UUID parent_facility_id converted to null:', currentPayload.parent_facility_id);
+        currentPayload.parent_facility_id = null;
+        continue;
+      }
       if (currentPayload.parent_id && !isValidUUID(currentPayload.parent_id)) {
         console.warn('[Supabase Facilities Safe] Non-UUID parent_id converted to null:', currentPayload.parent_id);
         currentPayload.parent_id = null;
         continue;
       }
 
-      // On insert, try deleting currentPayload.id to let PostgreSQL DEFAULT gen_random_uuid() take over
+      // If ID is still causing issues on insert, delete it
       if (operation === 'insert' && currentPayload.id) {
         delete currentPayload.id;
         continue;
       }
     }
 
-    // 2. Foreign key violation (23503) on parent_id
+    // 2. Not-null constraint violation on ID (23502) - happens if table lacks DEFAULT gen_random_uuid()
+    if (error.code === '23502' && (error.message?.includes('"id"') || error.message?.includes('column "id"'))) {
+      console.warn('[Supabase Facilities Safe] Table requires explicit ID. Generating valid UUID');
+      currentPayload.id = generateUUID();
+      continue;
+    }
+
+    // 3. Foreign key violation (23503) on parent_facility_id or parent_id
     if (error.code === '23503' || error.message?.includes('foreign key') || error.message?.includes('violates foreign key')) {
-      if (currentPayload.parent_id) {
-        console.warn('[Supabase Facilities Safe] Foreign key violation on parent_id. Setting parent_id = null');
+      if (currentPayload.parent_facility_id || currentPayload.parent_id) {
+        console.warn('[Supabase Facilities Safe] Foreign key violation on parent link. Setting parent to null');
+        currentPayload.parent_facility_id = null;
         currentPayload.parent_id = null;
         continue;
       }
     }
 
-    // 3. Unique violation (23505) on code or id
+    // 4. Unique violation (23505) on code or id
     if (error.code === '23505' || error.message?.includes('duplicate key') || error.message?.includes('unique constraint')) {
       if (error.message?.includes('facilities_pkey') || error.message?.includes('id')) {
         currentPayload.id = generateUUID();
@@ -735,7 +760,7 @@ export async function safeSupabaseFacilityMutation(
       }
     }
 
-    // 4. Missing column error (PGRST204 / 42703)
+    // 5. Missing column error (PGRST204 / 42703)
     if (
       error.code === 'PGRST204' || 
       error.code === '42703' || 
@@ -758,6 +783,7 @@ export async function safeSupabaseFacilityMutation(
 
       // Safe pruning of optional columns
       const optionalCols = [
+        'parent_facility_id',
         'job_roles',
         'solar_capacity_kw',
         'has_solar_pv',

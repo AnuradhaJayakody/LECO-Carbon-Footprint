@@ -65,11 +65,12 @@ END $$;
 
 -- 2. Facilities Table (Hierarchical Branch & CSC Structure)
 CREATE TABLE IF NOT EXISTS public.facilities (
-    id TEXT PRIMARY KEY,
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     code TEXT NOT NULL UNIQUE,
     name TEXT NOT NULL,
     type TEXT NOT NULL,
-    parent_id TEXT REFERENCES public.facilities(id) ON DELETE SET NULL,
+    parent_facility_id UUID REFERENCES public.facilities(id) ON DELETE SET NULL,
+    parent_id TEXT,
     is_parent BOOLEAN DEFAULT FALSE,
     location TEXT NOT NULL,
     responsible_officer TEXT NOT NULL,
@@ -83,6 +84,13 @@ CREATE TABLE IF NOT EXISTS public.facilities (
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Ensure parent_facility_id column exists
+DO $$ 
+BEGIN
+    ALTER TABLE public.facilities ADD COLUMN IF NOT EXISTS parent_facility_id UUID REFERENCES public.facilities(id) ON DELETE SET NULL;
+    ALTER TABLE public.facilities ADD COLUMN IF NOT EXISTS parent_id TEXT;
+END $$;
 
 -- 3. User Profiles & RBAC
 CREATE TABLE IF NOT EXISTS public.user_profiles (
