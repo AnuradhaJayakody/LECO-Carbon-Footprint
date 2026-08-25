@@ -168,7 +168,7 @@ export const FacilitiesManager: React.FC = () => {
     setCode(`LECO-FAC-${Date.now().toString(36).toUpperCase()}`);
     setName('');
     setType(defaultParentId ? 'CSC' : 'CSC');
-    setParentId(defaultParentId || parentBranches[0]?.id || '');
+    setParentId(defaultParentId || '');
     setIsParent(false);
     setLocation('');
     setResponsibleOfficer('');
@@ -222,7 +222,7 @@ export const FacilitiesManager: React.FC = () => {
   };
 
   // ==========================================================================
-  // CREATE / UPDATE: Direct Supabase Mutation & State Synchronisation
+  // CREATE / UPDATE: Direct Supabase Mutation & Verified State Synchronisation
   // ==========================================================================
   const handleSaveFacility = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -231,17 +231,16 @@ export const FacilitiesManager: React.FC = () => {
       return;
     }
 
-    if (type === 'CSC' && (!parentId || parentId === 'null' || parentId === 'none')) {
-      // If no parent branch is selected for CSC, warn if parent branches exist
-      if (parentBranches.length > 0) {
-        notify('Please select a Subordinate Parent Branch for this CSC', 'error');
-        return;
-      }
+    if (type === 'CSC' && (!parentId || parentId === 'null' || parentId === 'none' || parentId.trim() === '')) {
+      notify('Please select a Subordinate Parent Branch for this CSC', 'error');
+      return;
     }
 
     setIsSubmitting(true);
 
-    const cleanParentId = (type === 'CSC' && parentId && parentId !== 'null' && parentId !== 'none') ? parentId.trim() : null;
+    const cleanParentId = (type === 'CSC' && parentId && parentId !== 'null' && parentId !== 'none' && parentId.trim() !== '')
+      ? parentId.trim() 
+      : null;
 
     const payload: Partial<Facility> = {
       code: code.trim(),
@@ -265,6 +264,7 @@ export const FacilitiesManager: React.FC = () => {
       if (editingFacility) {
         // ------------------ UPDATE EXISTING FACILITY ------------------
         const row = toFacilityRow({ ...payload, id: editingFacility.id });
+        delete row.id; // DB ID is passed in query where clause
 
         if (supabase) {
           const result = await safeSupabaseFacilityMutation('update', row, editingFacility.id);
@@ -276,29 +276,28 @@ export const FacilitiesManager: React.FC = () => {
           }
         }
 
-        // Secondary sync to local server API for full consistency
+        // Secondary sync to local server API for consistency
         try {
-          await api.updateFacility(editingFacility.id, payload);
+          await fetch(`/api/facilities/${editingFacility.id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ...payload, id: editingFacility.id })
+          });
         } catch (apiErr) {
-          console.warn('Local API update warning:', apiErr);
+          console.warn('Local API update notice:', apiErr);
         }
 
         // Update local UI state ONLY after successful DB operation
-        const updatedRecord: Facility = {
-          ...editingFacility,
-          ...payload,
-          id: editingFacility.id
-        } as Facility;
-
-        setFacilitiesList(prev => prev.map(f => f.id === editingFacility.id ? updatedRecord : f));
+        await fetchFacilities();
+        await refreshFacilities();
         notify(`Facility "${payload.name}" updated successfully!`, 'success');
       } else {
         // ------------------ CREATE NEW FACILITY ------------------
-        // Do NOT pass client mock string ID ("fac-xxx") to Supabase.
-        // Omit local ID so PostgreSQL automatically assigns a valid UUID (DEFAULT gen_random_uuid())
+        // Strictly omit temporary frontend id so PostgreSQL assigns a valid UUID (DEFAULT gen_random_uuid())
         const row = toFacilityRow(payload);
+        delete row.id;
 
-        let createdFacilityId: string | undefined;
+        let createdFacility: Facility | undefined;
 
         if (supabase) {
           const result = await safeSupabaseFacilityMutation('insert', row);
@@ -306,36 +305,38 @@ export const FacilitiesManager: React.FC = () => {
             const msg = result.error?.message || 'Failed to create facility in Supabase database';
             notify(msg, 'error');
             setIsSubmitting(false);
-            return;
+            return; // Do NOT update state or close modal on error
           }
-          if (result.data?.id) {
-            createdFacilityId = result.data.id;
+          if (result.data) {
+            createdFacility = result.data;
           }
         }
 
-        if (!createdFacilityId) {
-          createdFacilityId = generateUUID();
+        if (!createdFacility) {
+          createdFacility = {
+            ...payload,
+            id: generateUUID()
+          } as Facility;
         }
 
-        const newRecord: Facility = {
-          ...payload,
-          id: createdFacilityId
-        } as Facility;
-
-        // Secondary sync to local server API
+        // Secondary sync to local server without duplicate Supabase mutation
         try {
-          await api.createFacility(newRecord);
+          await fetch('/api/facilities', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(createdFacility)
+          });
         } catch (apiErr) {
-          console.warn('Local API insert warning:', apiErr);
+          console.warn('Local API insert notice:', apiErr);
         }
 
         // Update local UI state ONLY after successful DB operation
-        setFacilitiesList(prev => [...prev, newRecord]);
+        await fetchFacilities();
+        await refreshFacilities();
         notify(`New Facility "${payload.name}" created successfully!`, 'success');
       }
 
       setIsModalOpen(false);
-      await refreshFacilities();
     } catch (err: any) {
       notify(err.message || 'Failed to save facility', 'error');
     } finally {
@@ -364,16 +365,18 @@ export const FacilitiesManager: React.FC = () => {
 
       // Secondary sync to local server API
       try {
-        await api.deleteFacility(id);
+        await fetch(`/api/facilities/${id}`, {
+          method: 'DELETE'
+        });
       } catch (apiErr) {
-        console.warn('Local API delete warning:', apiErr);
+        console.warn('Local API delete notice:', apiErr);
       }
 
       // Update local UI state ONLY after successful DB operation
-      setFacilitiesList(prev => prev.filter(f => f.id !== id));
-      notify('Facility record removed successfully from database', 'success');
-      setDeleteConfirmId(null);
+      await fetchFacilities();
       await refreshFacilities();
+      setDeleteConfirmId(null);
+      notify('Facility record removed successfully from database', 'success');
     } catch (err: any) {
       notify(err.message || 'Could not delete facility', 'error');
     }
@@ -1135,8 +1138,8 @@ export const FacilitiesManager: React.FC = () => {
                     onChange={(e) => {
                       const newType = e.target.value as FacilityType;
                       setType(newType);
-                      if (newType === 'CSC' && !parentId && parentBranches.length > 0) {
-                        setParentId(parentBranches[0].id);
+                      if (newType !== 'CSC') {
+                        setParentId('');
                       }
                     }}
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
@@ -1160,10 +1163,10 @@ export const FacilitiesManager: React.FC = () => {
                     <select
                       value={parentId}
                       onChange={(e) => setParentId(e.target.value)}
-                      required
+                      required={type === 'CSC'}
                       className="w-full px-3 py-2 bg-blue-50/60 border border-blue-300 rounded-xl text-slate-800 font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500"
                     >
-                      <option value="">-- Select Parent Branch --</option>
+                      <option value="" disabled>-- Select Parent Branch --</option>
                       {parentBranches.map(b => (
                         <option key={b.id} value={b.id}>
                           {b.name} ({b.code})

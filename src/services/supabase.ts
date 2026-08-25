@@ -125,17 +125,18 @@ export async function testSupabaseConnection(): Promise<{ success: boolean; mess
 
 export function toFacilityRow(fac: Partial<Facility>): Record<string, any> {
   const row: Record<string, any> = {};
-  if (fac.id !== undefined) {
-    if (isValidUUID(fac.id)) {
-      row.id = fac.id;
-    } else if (typeof fac.id === 'string' && fac.id.trim().length > 0 && !fac.id.startsWith('fac-')) {
-      row.id = fac.id.trim();
-    }
+  
+  // STRICT: Only include id if it is a genuine, valid UUID.
+  // Never pass frontend temporary IDs (e.g. 'fac-xxx') so Supabase/PostgreSQL auto-generates a valid UUID.
+  if (fac.id !== undefined && isValidUUID(fac.id)) {
+    row.id = fac.id;
   }
+
   if (fac.code !== undefined) row.code = fac.code?.trim();
   if (fac.name !== undefined) row.name = fac.name?.trim();
   if (fac.type !== undefined) row.type = fac.type;
   
+  // Hierarchy mapping: sync both parent_facility_id and parent_id
   if (fac.parentId !== undefined) {
     const pid = fac.parentId;
     if (!pid || pid === 'null' || pid === 'none' || pid === 'undefined' || (typeof pid === 'string' && pid.trim() === '')) {
