@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { Facility, FacilityType, JobRole } from '../types';
+import { Facility, FacilityType } from '../types';
 import { api } from '../services/api';
 import { 
   supabase, 
@@ -66,7 +66,7 @@ export const FacilitiesManager: React.FC = () => {
   // Form State
   const [code, setCode] = useState('');
   const [name, setName] = useState('');
-  const [type, setType] = useState<FacilityType>('CSC');
+  const [type, setType] = useState<FacilityType | ''>('');
   const [parentId, setParentId] = useState<string>('');
   const [isParent, setIsParent] = useState(false);
   const [location, setLocation] = useState('');
@@ -77,9 +77,6 @@ export const FacilitiesManager: React.FC = () => {
   const [electricityAccountNo, setElectricityAccountNo] = useState('');
   const [hasSolarPV, setHasSolarPV] = useState(false);
   const [solarCapacityKW, setSolarCapacityKW] = useState<number>(0);
-  const [jobRoles, setJobRoles] = useState<JobRole[]>([]);
-  const [newRoleName, setNewRoleName] = useState('');
-  const [newRoleDesc, setNewRoleDesc] = useState('');
 
   // ==========================================================================
   // READ: Fetch facilities directly from Supabase on mount
@@ -167,21 +164,17 @@ export const FacilitiesManager: React.FC = () => {
     setEditingFacility(null);
     setCode(`LECO-FAC-${Date.now().toString(36).toUpperCase()}`);
     setName('');
-    setType(defaultParentId ? 'CSC' : 'CSC');
+    setType(defaultParentId ? 'CSC' : '');
     setParentId(defaultParentId || '');
     setIsParent(false);
     setLocation('');
     setResponsibleOfficer('');
-    setHeadDesignation('Customer Service Lead');
+    setHeadDesignation('');
     setOfficerEmail('');
     setContactNumber('+94 ');
     setElectricityAccountNo('');
     setHasSolarPV(false);
     setSolarCapacityKW(0);
-    setJobRoles([
-      { id: `jr-1`, facilityId: '', roleName: 'Customer Service Lead', description: 'Customer queries and billing' },
-      { id: `jr-2`, facilityId: '', roleName: 'Breakdown Technician', description: 'Emergency fault repairs' }
-    ]);
     setIsModalOpen(true);
   };
 
@@ -200,25 +193,7 @@ export const FacilitiesManager: React.FC = () => {
     setElectricityAccountNo(fac.electricityAccountNo || '');
     setHasSolarPV(fac.hasSolarPV || false);
     setSolarCapacityKW(fac.solarCapacityKW || 0);
-    setJobRoles(fac.jobRoles || []);
     setIsModalOpen(true);
-  };
-
-  const handleAddJobRole = () => {
-    if (!newRoleName.trim()) return;
-    const newRole: JobRole = {
-      id: `jr-${Date.now().toString(36)}`,
-      facilityId: editingFacility ? editingFacility.id : '',
-      roleName: newRoleName.trim(),
-      description: newRoleDesc.trim() || undefined
-    };
-    setJobRoles([...jobRoles, newRole]);
-    setNewRoleName('');
-    setNewRoleDesc('');
-  };
-
-  const handleRemoveJobRole = (id: string) => {
-    setJobRoles(jobRoles.filter(r => r.id !== id));
   };
 
   // ==========================================================================
@@ -226,6 +201,11 @@ export const FacilitiesManager: React.FC = () => {
   // ==========================================================================
   const handleSaveFacility = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!type) {
+      notify('Please select a Facility Type', 'error');
+      return;
+    }
+
     if (!code.trim() || !name.trim() || !responsibleOfficer.trim() || !officerEmail.trim()) {
       notify('Please complete all mandatory facility fields', 'error');
       return;
@@ -245,7 +225,7 @@ export const FacilitiesManager: React.FC = () => {
     const payload: Partial<Facility> = {
       code: code.trim(),
       name: name.trim(),
-      type,
+      type: type as FacilityType,
       parentId: cleanParentId,
       parentName: cleanParentId ? parentBranches.find(b => b.id === cleanParentId)?.name : undefined,
       isParent: type === 'Branch' ? true : isParent,
@@ -257,7 +237,7 @@ export const FacilitiesManager: React.FC = () => {
       electricityAccountNo: electricityAccountNo.trim() || undefined,
       hasSolarPV,
       solarCapacityKW: hasSolarPV ? Number(solarCapacityKW) : 0,
-      jobRoles
+      jobRoles: editingFacility?.jobRoles || []
     };
 
     try {
@@ -1136,14 +1116,16 @@ export const FacilitiesManager: React.FC = () => {
                   <select
                     value={type}
                     onChange={(e) => {
-                      const newType = e.target.value as FacilityType;
+                      const newType = e.target.value as FacilityType | '';
                       setType(newType);
                       if (newType !== 'CSC') {
                         setParentId('');
                       }
                     }}
+                    required
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-800 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   >
+                    <option value="" disabled>-- Select Facility Type --</option>
                     <option value="Branch">Branch (Regional Hub)</option>
                     <option value="CSC">Customer Service Centre (CSC)</option>
                     <option value="Head Office">Corporate Head Office</option>
@@ -1336,55 +1318,6 @@ export const FacilitiesManager: React.FC = () => {
                     />
                   </div>
                 )}
-              </div>
-
-              {/* Job Roles Management */}
-              <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl space-y-3">
-                <div className="font-bold text-slate-700 uppercase tracking-wider text-[11px]">
-                  Facility Job Roles Configuration
-                </div>
-
-                <div className="flex flex-col sm:flex-row gap-2">
-                  <input
-                    type="text"
-                    value={newRoleName}
-                    onChange={(e) => setNewRoleName(e.target.value)}
-                    placeholder="New role title (e.g. Field Lineman Lead)"
-                    className="flex-1 px-3 py-1.5 bg-white border border-slate-300 rounded-xl text-slate-800"
-                  />
-                  <input
-                    type="text"
-                    value={newRoleDesc}
-                    onChange={(e) => setNewRoleDesc(e.target.value)}
-                    placeholder="Role responsibilities..."
-                    className="flex-1 px-3 py-1.5 bg-white border border-slate-300 rounded-xl text-slate-800"
-                  />
-                  <button
-                    type="button"
-                    onClick={handleAddJobRole}
-                    className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded-xl font-bold cursor-pointer"
-                  >
-                    Add Role
-                  </button>
-                </div>
-
-                <div className="space-y-1.5 max-h-36 overflow-y-auto pt-1">
-                  {jobRoles.map((r) => (
-                    <div key={r.id} className="flex items-center justify-between p-2 bg-white border border-slate-200 rounded-lg text-xs">
-                      <div>
-                        <span className="font-bold text-slate-800">{r.roleName}</span>
-                        {r.description && <span className="text-slate-500 ml-2 text-[11px]">- {r.description}</span>}
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveJobRole(r.id)}
-                        className="text-rose-500 hover:text-rose-700 p-1 cursor-pointer"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
               </div>
 
             </form>
