@@ -1,5 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
-import { Facility, User, Scope1Record, Scope2Record, Scope3Record } from '../types';
+import { Facility, User, Scope1Record, Scope2Record, Scope3Record, EmissionFactor } from '../types';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
@@ -807,4 +807,206 @@ export async function safeSupabaseFacilityMutation(
 
   return { success: false, error: new Error('Exceeded maximum schema retry attempts for facility mutation') };
 }
+
+export function toEmissionFactorRow(ef: Partial<EmissionFactor>): Record<string, any> {
+  const row: Record<string, any> = {};
+  if (ef.id !== undefined) {
+    if (isValidUUID(ef.id)) {
+      row.id = ef.id;
+    }
+  }
+  if (ef.category !== undefined) {
+    row.category = ef.category;
+  }
+  if (ef.name !== undefined || ef.fuel_or_material !== undefined) {
+    const n = (ef.name || ef.fuel_or_material || '').trim();
+    row.name = n;
+    row.fuel_or_material = n;
+  }
+  if (ef.factor !== undefined || ef.factor_kg_co2e !== undefined) {
+    const val = Number(ef.factor ?? ef.factor_kg_co2e ?? 0);
+    row.factor = val;
+    row.factor_kg_co2e = val;
+  }
+  if (ef.unit !== undefined) {
+    row.unit = ef.unit.trim();
+  }
+  if (ef.source !== undefined || ef.referenceSource !== undefined) {
+    const s = (ef.source || ef.referenceSource || '').trim();
+    row.source = s;
+    row.reference_source = s;
+  }
+  if (ef.description !== undefined) {
+    row.description = ef.description.trim();
+    row.notes = ef.description.trim();
+  }
+  return row;
+}
+
+export function fromEmissionFactorRow(row: any): EmissionFactor {
+  const categoryRaw = row.category || row.scope_category || row.scope || 'Scope 1';
+  let category: 'Scope 1' | 'Scope 2' | 'Scope 3' = 'Scope 1';
+  const catLower = String(categoryRaw || '').toLowerCase();
+  if (catLower.includes('2')) category = 'Scope 2';
+  else if (catLower.includes('3')) category = 'Scope 3';
+  else category = 'Scope 1';
+
+  const name = String(row.name || row.fuel_or_material || row.itemName || row.item_name || row.fuel_type || 'Emission Factor');
+  const factor = Number(row.factor ?? row.factor_kg_co2e ?? row.coefficient ?? row.value ?? 0);
+  const unit = String(row.unit || row.unit_of_measure || 'kg CO2e');
+  const source = String(row.source || row.reference_source || row.referenceSource || row.governing_authority || 'IPCC / SLSEA');
+  const description = String(row.description || row.notes || row.subCategory || row.sub_category || '');
+
+  return {
+    id: String(row.id || ''),
+    category,
+    name,
+    factor,
+    unit,
+    source,
+    description,
+    fuel_or_material: name,
+    factor_kg_co2e: factor,
+    referenceSource: source
+  };
+}
+
+/**
+ * Schema-Safe Supabase Emission Factor Mutation Helper.
+ * Handles UUID vs TEXT ID types (22P02), unique constraints, and missing columns (PGRST204).
+ */
+export async function safeSupabaseEmissionFactorMutation(
+  operation: 'insert' | 'update' | 'delete',
+  payload: Record<string, any>,
+  factorId?: string
+): Promise<{ success: boolean; data?: any; error?: any; isNetworkError?: boolean }> {
+  if (!supabase) {
+    return { success: false, error: new Error('Supabase client is not configured') };
+  }
+
+  if (operation === 'delete') {
+    if (!factorId) return { success: false, error: new Error('Factor ID required for deletion') };
+    try {
+      const { error } = await supabase.from('emission_factors').delete().eq('id', factorId);
+      if (error) {
+        return { success: false, error };
+      }
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err };
+    }
+  }
+
+  let currentPayload: Record<string, any> = { ...payload };
+
+  // On INSERT: If ID is not a valid UUID, delete it so PostgreSQL can auto-generate
+  if (operation === 'insert') {
+    if (!currentPayload.id || !isValidUUID(currentPayload.id)) {
+      delete currentPayload.id;
+    }
+  }
+
+  const maxRetries = 8;
+  let attempt = 0;
+
+  while (attempt < maxRetries) {
+    attempt++;
+    let queryResult: any;
+
+    try {
+      if (operation === 'insert') {
+        queryResult = await supabase.from('emission_factors').insert([currentPayload]).select().maybeSingle();
+      } else {
+        const idToUpdate = factorId || currentPayload.id;
+        queryResult = await supabase.from('emission_factors').update(currentPayload).eq('id', idToUpdate).select().maybeSingle();
+      }
+    } catch (err: any) {
+      queryResult = { error: err };
+    }
+
+    const { data, error } = queryResult;
+
+    if (!error) {
+      return { success: true, data: data ? fromEmissionFactorRow(data) : undefined };
+    }
+
+    // 0. Network error
+    const errorMsg = error.message || String(error || '');
+    if (
+      errorMsg.includes('Failed to fetch') ||
+      errorMsg.includes('NetworkError') ||
+      errorMsg.includes('fetch failed')
+    ) {
+      return { success: false, isNetworkError: true, error };
+    }
+
+    // 1. UUID syntax error (22P02): "invalid input syntax for type uuid"
+    if (error.code === '22P02' || error.message?.includes('invalid input syntax for type uuid')) {
+      console.warn('[Supabase EF Safe] UUID syntax error (22P02):', error.message);
+      if (operation === 'insert' && currentPayload.id) {
+        delete currentPayload.id;
+        continue;
+      }
+    }
+
+    // 2. Not-null constraint violation on ID (23502)
+    if (error.code === '23502' && (error.message?.includes('"id"') || error.message?.includes('column "id"'))) {
+      console.warn('[Supabase EF Safe] Generating explicit UUID for ID');
+      currentPayload.id = generateUUID();
+      continue;
+    }
+
+    // 3. Unique violation (23505)
+    if (error.code === '23505' || error.message?.includes('duplicate key') || error.message?.includes('unique constraint')) {
+      if (error.message?.includes('emission_factors_pkey') || error.message?.includes('id')) {
+        currentPayload.id = generateUUID();
+        continue;
+      }
+    }
+
+    // 4. Missing column error (PGRST204 / 42703)
+    if (
+      error.code === 'PGRST204' || 
+      error.code === '42703' || 
+      error.message?.includes('Could not find the') || 
+      (error.message?.includes('column') && error.message?.includes('does not exist'))
+    ) {
+      const match = 
+        error.message?.match(/Could not find the '([^']+)' column/) ||
+        error.message?.match(/column "([^"]+)" of relation/) ||
+        error.message?.match(/column "([^"]+)" does not exist/) ||
+        error.message?.match(/column '([^']+)' does not exist/) ||
+        error.message?.match(/column ([a-zA-Z0-9_]+) does not exist/);
+      const missingCol = match ? match[1] : null;
+
+      if (missingCol && currentPayload[missingCol] !== undefined) {
+        console.warn(`[Supabase EF Safe] Pruning missing column '${missingCol}' and retrying`);
+        delete currentPayload[missingCol];
+        continue;
+      }
+
+      // Safe pruning of optional columns
+      const optionalCols = [
+        'fuel_or_material',
+        'factor_kg_co2e',
+        'reference_source',
+        'notes',
+        'description',
+        'unit_of_measure',
+        'item_name'
+      ];
+      const nextCol = optionalCols.find(col => currentPayload[col] !== undefined);
+      if (nextCol) {
+        console.warn(`[Supabase EF Safe] Pruning optional column '${nextCol}' and retrying`);
+        delete currentPayload[nextCol];
+        continue;
+      }
+    }
+
+    return { success: false, error };
+  }
+
+  return { success: false, error: new Error('Exceeded maximum schema retry attempts for emission factor mutation') };
+}
+
 

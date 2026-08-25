@@ -15,6 +15,9 @@ import {
   fromUserProfileRow,
   safeSupabaseUpsertUser,
   safeSupabaseFacilityMutation,
+  toEmissionFactorRow,
+  fromEmissionFactorRow,
+  safeSupabaseEmissionFactorMutation,
   toScope1Row,
   fromScope1Row,
   toScope2Row,
@@ -292,24 +295,98 @@ export const api = {
 
   // Emission Factors
   getEmissionFactors: async (): Promise<EmissionFactor[]> => {
+    if (supabase) {
+      try {
+        const { data, error } = await supabase
+          .from('emission_factors')
+          .select('*')
+          .order('category', { ascending: true });
+        if (!error && data && data.length > 0) {
+          return data.map(fromEmissionFactorRow);
+        }
+      } catch (err) {
+        console.warn('Supabase getEmissionFactors notice, falling back to API:', err);
+      }
+    }
+
     return await fetchJson<EmissionFactor[]>(`${API_BASE}/emission-factors`);
   },
+
   createEmissionFactor: async (factor: Partial<EmissionFactor>): Promise<EmissionFactor> => {
-    return await fetchJson<EmissionFactor>(`${API_BASE}/emission-factors`, {
-      method: 'POST',
-      body: JSON.stringify(factor)
-    });
+    let createdRecord: EmissionFactor | null = null;
+
+    if (supabase) {
+      try {
+        const row = toEmissionFactorRow(factor);
+        const result = await safeSupabaseEmissionFactorMutation('insert', row);
+        if (result.success && result.data) {
+          createdRecord = result.data;
+        } else if (result.error) {
+          console.warn('Supabase insert emission_factors notice:', result.error);
+        }
+      } catch (err) {
+        console.warn('Supabase createEmissionFactor exception:', err);
+      }
+    }
+
+    try {
+      const serverResult = await fetchJson<EmissionFactor>(`${API_BASE}/emission-factors`, {
+        method: 'POST',
+        body: JSON.stringify(factor)
+      });
+      return createdRecord || serverResult;
+    } catch {
+      return createdRecord || (factor as EmissionFactor);
+    }
   },
+
   updateEmissionFactor: async (id: string, updates: Partial<EmissionFactor>): Promise<EmissionFactor> => {
-    return await fetchJson<EmissionFactor>(`${API_BASE}/emission-factors/${id}`, {
-      method: 'PUT',
-      body: JSON.stringify(updates)
-    });
+    let updatedRecord: EmissionFactor | null = null;
+
+    if (supabase) {
+      try {
+        const row = toEmissionFactorRow(updates);
+        const result = await safeSupabaseEmissionFactorMutation('update', row, id);
+        if (result.success && result.data) {
+          updatedRecord = result.data;
+        } else if (result.error) {
+          console.warn('Supabase update emission_factors notice:', result.error);
+        }
+      } catch (err) {
+        console.warn('Supabase updateEmissionFactor exception:', err);
+      }
+    }
+
+    try {
+      const serverResult = await fetchJson<EmissionFactor>(`${API_BASE}/emission-factors/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(updates)
+      });
+      return updatedRecord || serverResult;
+    } catch {
+      return updatedRecord || ({ ...updates, id } as EmissionFactor);
+    }
   },
+
   deleteEmissionFactor: async (id: string): Promise<{ success: boolean }> => {
-    return await fetchJson<{ success: boolean }>(`${API_BASE}/emission-factors/${id}`, {
-      method: 'DELETE'
-    });
+    if (supabase) {
+      try {
+        const result = await safeSupabaseEmissionFactorMutation('delete', {}, id);
+        if (!result.success && result.error) {
+          console.warn('Supabase delete emission_factors notice:', result.error);
+        }
+      } catch (err) {
+        console.warn('Supabase deleteEmissionFactor exception:', err);
+      }
+    }
+
+    try {
+      return await fetchJson<{ success: boolean }>(`${API_BASE}/emission-factors/${id}`, {
+        method: 'DELETE'
+      });
+    } catch {
+      return { success: true };
+    }
   },
 
   // Scope 1

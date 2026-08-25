@@ -166,6 +166,12 @@ export interface EmissionFactor {
   unit: string;
   source: string;
   description?: string;
+  fuel_or_material?: string;
+  factor_kg_co2e?: number;
+  subCategory?: string;
+  referenceSource?: string;
+  year?: number;
+  isCustom?: boolean;
 }
 
 export interface MonthlyEmissionTrend {
