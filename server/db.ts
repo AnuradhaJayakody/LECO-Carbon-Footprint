@@ -900,21 +900,51 @@ export const DEFAULT_USERS: User[] = [
 ];
 
 export const DEFAULT_EMISSION_FACTORS: EmissionFactor[] = [
-  { id: 'ef-1', category: 'Scope 1', subCategory: 'Stationary Fuel', itemName: 'Diesel (Industrial Generator)', factor: 2.6878, unit: 'kg CO2e / Liter', referenceSource: 'IPCC 2006 Guidelines for National GHG Inventories', year: 2024, isCustom: false },
-  { id: 'ef-2', category: 'Scope 1', subCategory: 'Stationary Fuel', itemName: 'Heavy Fuel Oil (Furnace Oil)', factor: 3.1780, unit: 'kg CO2e / Liter', referenceSource: 'IPCC 2006 Guidelines', year: 2024, isCustom: false },
-  { id: 'ef-3', category: 'Scope 1', subCategory: 'Stationary Fuel', itemName: 'LPG (Liquid Petroleum Gas)', factor: 1.5120, unit: 'kg CO2e / Liter', referenceSource: 'IPCC 2006 Guidelines', year: 2024, isCustom: false },
-  { id: 'ef-4', category: 'Scope 1', subCategory: 'Mobile Fuel', itemName: 'Diesel (Commercial Vans & Trucks)', factor: 2.6878, unit: 'kg CO2e / Liter', referenceSource: 'DEFRA / IPCC 2006 Mobile Combustion', year: 2024, isCustom: false },
-  { id: 'ef-5', category: 'Scope 1', subCategory: 'Mobile Fuel', itemName: 'Petrol / Gasoline (Motorbikes & Cars)', factor: 2.3149, unit: 'kg CO2e / Liter', referenceSource: 'DEFRA / IPCC 2006 Mobile Combustion', year: 2024, isCustom: false },
-  { id: 'ef-6', category: 'Scope 1', subCategory: 'Fugitive Gas', itemName: 'SF6 (Sulfur Hexafluoride - Switchgear)', factor: 22800.0, unit: 'kg CO2e / kg', referenceSource: 'IPCC AR4 / AR5 GWP Factor', year: 2024, isCustom: false },
-  { id: 'ef-7', category: 'Scope 1', subCategory: 'Fugitive Gas', itemName: 'R410A Refrigerant', factor: 2088.0, unit: 'kg CO2e / kg', referenceSource: 'IPCC AR4 GWP Factor', year: 2024, isCustom: false },
-  { id: 'ef-8', category: 'Scope 1', subCategory: 'Fugitive Gas', itemName: 'R134a Refrigerant', factor: 1430.0, unit: 'kg CO2e / kg', referenceSource: 'IPCC AR4 GWP Factor', year: 2024, isCustom: false },
-  { id: 'ef-9', category: 'Scope 2', subCategory: 'Electricity Grid', itemName: 'Sri Lanka National Grid Average (CEB/LECO)', factor: 0.6550, unit: 'kg CO2e / kWh', referenceSource: 'Sri Lanka Sustainable Energy Authority (SLSEA) 2023/24 Grid Factor', year: 2024, isCustom: false },
-  { id: 'ef-10', category: 'Scope 3', subCategory: 'Purchased Goods', itemName: 'Paper Consumption (A4 Office Ream)', factor: 0.9500, unit: 'kg CO2e / kg', referenceSource: 'DEFRA 2024 Material Use', year: 2024, isCustom: false },
-  { id: 'ef-11', category: 'Scope 3', subCategory: 'Purchased Goods', itemName: 'Distribution Transformers (New)', factor: 4.2000, unit: 'kg CO2e / kg', referenceSource: 'LECO LCA Environmental Assessment 2023', year: 2024, isCustom: false },
-  { id: 'ef-12', category: 'Scope 3', subCategory: 'Purchased Goods', itemName: 'Smart Electricity Meters (LHM)', factor: 8.5000, unit: 'kg CO2e / unit', referenceSource: 'LECO Meter Factory LCA Study', year: 2024, isCustom: false },
-  { id: 'ef-13', category: 'Scope 3', subCategory: 'Waste Operations', itemName: 'Municipal Solid Waste Landfill', factor: 0.5200, unit: 'kg CO2e / kg', referenceSource: 'DEFRA 2024 Waste Disposal', year: 2024, isCustom: false },
-  { id: 'ef-14', category: 'Scope 3', subCategory: 'Business Travel', itemName: 'Domestic Air & Road Travel (Chartered)', factor: 0.1700, unit: 'kg CO2e / passenger-km', referenceSource: 'DEFRA 2024 Business Travel', year: 2024, isCustom: false },
-  { id: 'ef-15', category: 'Scope 3', subCategory: 'Employee Commute', itemName: 'Average Commute (Motorbike/Bus/Car blend)', factor: 0.0890, unit: 'kg CO2e / passenger-km', referenceSource: 'DEFRA 2024 Commuting Factor', year: 2024, isCustom: false }
+  // Scope 1 - Stationary Diesel Generator
+  { id: 'ef-1', category: 'Scope 1 - Stationary Diesel Generator (Backup Power)', name: 'Auto Diesel (Backup Power)', fuel_or_material: 'Auto Diesel', factor: 2.6878, factor_kg_co2e: 2.6878, unit: 'Liters', source: 'IPCC 2006 Guidelines for National GHG Inventories', referenceSource: 'IPCC 2006 Guidelines for National GHG Inventories', year: 2024, isCustom: false },
+  { id: 'ef-2', category: 'Scope 1 - Stationary Diesel Generator (Backup Power)', name: 'Super Diesel (Euro 4)', fuel_or_material: 'Super Diesel', factor: 2.6400, factor_kg_co2e: 2.6400, unit: 'Liters', source: 'IPCC 2006 Guidelines', referenceSource: 'IPCC 2006 Guidelines', year: 2024, isCustom: false },
+  { id: 'ef-3', category: 'Scope 1 - Stationary Diesel Generator (Backup Power)', name: 'Heavy Fuel Oil (Furnace Oil)', fuel_or_material: 'Heavy Fuel Oil', factor: 3.1780, factor_kg_co2e: 3.1780, unit: 'Liters', source: 'IPCC 2006 Guidelines', referenceSource: 'IPCC 2006 Guidelines', year: 2024, isCustom: false },
+  { id: 'ef-4', category: 'Scope 1 - Stationary Diesel Generator (Backup Power)', name: 'LPG (Liquid Petroleum Gas)', fuel_or_material: 'LPG', factor: 1.5120, factor_kg_co2e: 1.5120, unit: 'Liters', source: 'IPCC 2006 Guidelines', referenceSource: 'IPCC 2006 Guidelines', year: 2024, isCustom: false },
+
+  // Scope 1 - Mobile Fleet Vehicle
+  { id: 'ef-5', category: 'Scope 1 - Mobile Fleet Vehicle (Lorry / Van / Boom Truck)', name: 'Auto Diesel (Commercial Vans & Trucks)', fuel_or_material: 'Auto Diesel', factor: 2.6878, factor_kg_co2e: 2.6878, unit: 'Liters', source: 'DEFRA / IPCC 2006 Mobile Combustion', referenceSource: 'DEFRA / IPCC 2006 Mobile Combustion', year: 2024, isCustom: false },
+  { id: 'ef-6', category: 'Scope 1 - Mobile Fleet Vehicle (Lorry / Van / Boom Truck)', name: 'Petrol / Gasoline (Motorbikes & Fleet Cars)', fuel_or_material: 'Petrol / Gasoline', factor: 2.3149, factor_kg_co2e: 2.3149, unit: 'Liters', source: 'DEFRA / IPCC 2006 Mobile Combustion', referenceSource: 'DEFRA / IPCC 2006 Mobile Combustion', year: 2024, isCustom: false },
+  { id: 'ef-7', category: 'Scope 1 - Mobile Fleet Vehicle (Lorry / Van / Boom Truck)', name: 'Super Diesel (Euro 4 Commercial Fleet)', fuel_or_material: 'Super Diesel', factor: 2.6400, factor_kg_co2e: 2.6400, unit: 'Liters', source: 'DEFRA 2024 Transport', referenceSource: 'DEFRA 2024 Transport', year: 2024, isCustom: false },
+
+  // Scope 1 - Fugitive SF6 Gas
+  { id: 'ef-8', category: 'Scope 1 - Fugitive SF6 Gas (Circuit Breaker / Switchgear)', name: 'SF6 (Sulfur Hexafluoride - Switchgear)', fuel_or_material: 'SF6', factor: 22800.0, factor_kg_co2e: 22800.0, unit: 'kg', source: 'IPCC AR4 / AR5 GWP Factor', referenceSource: 'IPCC AR4 / AR5 GWP Factor', year: 2024, isCustom: false },
+
+  // Scope 1 - Fugitive HVAC Refrigerant
+  { id: 'ef-9', category: 'Scope 1 - Fugitive HVAC Refrigerant (R410A / R134a)', name: 'R410A Refrigerant', fuel_or_material: 'R410A', factor: 2088.0, factor_kg_co2e: 2088.0, unit: 'kg', source: 'IPCC AR4 GWP Factor', referenceSource: 'IPCC AR4 GWP Factor', year: 2024, isCustom: false },
+  { id: 'ef-10', category: 'Scope 1 - Fugitive HVAC Refrigerant (R410A / R134a)', name: 'R134a Refrigerant', fuel_or_material: 'R134a', factor: 1430.0, factor_kg_co2e: 1430.0, unit: 'kg', source: 'IPCC AR4 GWP Factor', referenceSource: 'IPCC AR4 GWP Factor', year: 2024, isCustom: false },
+  { id: 'ef-11', category: 'Scope 1 - Fugitive HVAC Refrigerant (R410A / R134a)', name: 'R22 Refrigerant', fuel_or_material: 'R22', factor: 1810.0, factor_kg_co2e: 1810.0, unit: 'kg', source: 'IPCC AR4 GWP Factor', referenceSource: 'IPCC AR4 GWP Factor', year: 2024, isCustom: false },
+  { id: 'ef-12', category: 'Scope 1 - Fugitive HVAC Refrigerant (R410A / R134a)', name: 'R32 Refrigerant', fuel_or_material: 'R32', factor: 675.0, factor_kg_co2e: 675.0, unit: 'kg', source: 'IPCC AR5 GWP Factor', referenceSource: 'IPCC AR5 GWP Factor', year: 2024, isCustom: false },
+
+  // Scope 2 - Grid Electricity
+  { id: 'ef-13', category: 'Scope 2 - Grid Electricity', name: 'Sri Lanka National Grid Average (CEB/LECO)', fuel_or_material: 'Grid Electricity', factor: 0.5820, factor_kg_co2e: 0.5820, unit: 'kWh', source: 'Sri Lanka Sustainable Energy Authority (SLSEA) 2023/24 Grid Factor', referenceSource: 'Sri Lanka Sustainable Energy Authority (SLSEA) 2023/24 Grid Factor', year: 2024, isCustom: false },
+
+  // Scope 3 - Category 1: Purchased Goods & Equipment
+  { id: 'ef-14', category: 'Scope 3 - Category 1: Purchased Goods & Equipment', name: 'Smart Single-Phase Electricity Meters (LHM)', fuel_or_material: 'Smart Meters', factor: 8.5000, factor_kg_co2e: 8.5000, unit: 'Units', source: 'LECO Meter Factory LCA Study / DEFRA', referenceSource: 'LECO Meter Factory LCA Study / DEFRA', year: 2024, isCustom: false },
+  { id: 'ef-15', category: 'Scope 3 - Category 1: Purchased Goods & Equipment', name: 'Distribution Transformers 100kVA - 250kVA', fuel_or_material: 'Distribution Transformers', factor: 420.0000, factor_kg_co2e: 420.0000, unit: 'Units', source: 'LECO LCA Environmental Assessment 2023', referenceSource: 'LECO LCA Environmental Assessment 2023', year: 2024, isCustom: false },
+  { id: 'ef-16', category: 'Scope 3 - Category 1: Purchased Goods & Equipment', name: 'Aerial Bundled Cables (ABC) & Conductors', fuel_or_material: 'ABC Cables', factor: 2.1000, factor_kg_co2e: 2.1000, unit: 'Meters', source: 'DEFRA 2024 / IPCC Embodied Carbon Guidelines', referenceSource: 'DEFRA 2024 / IPCC Embodied Carbon Guidelines', year: 2024, isCustom: false },
+  { id: 'ef-17', category: 'Scope 3 - Category 1: Purchased Goods & Equipment', name: 'A4 Office Copy Paper (Reams)', fuel_or_material: 'A4 Paper', factor: 2.3750, factor_kg_co2e: 2.3750, unit: 'Reams', source: 'DEFRA 2024 Material Use Standards (0.95 kg CO2e/kg)', referenceSource: 'DEFRA 2024 Material Use Standards', year: 2024, isCustom: false },
+
+  // Scope 3 - Category 2: Capital Goods
+  { id: 'ef-18', category: 'Scope 3 - Category 2: Capital Goods', name: 'Primary Substation GIS & Switchgear Assemblies', fuel_or_material: 'Substation GIS Assemblies', factor: 4500.0000, factor_kg_co2e: 4500.0000, unit: 'Units', source: 'LECO Capital Equipment Carbon Inventory', referenceSource: 'LECO Capital Equipment Carbon Inventory', year: 2024, isCustom: false },
+  { id: 'ef-19', category: 'Scope 3 - Category 2: Capital Goods', name: 'Concrete Transmission & Distribution Poles', fuel_or_material: 'Concrete Poles', factor: 185.0000, factor_kg_co2e: 185.0000, unit: 'Units', source: 'SLSEA Embodied Construction Standards', referenceSource: 'SLSEA Embodied Construction Standards', year: 2024, isCustom: false },
+
+  // Scope 3 - Category 6: Business Travel
+  { id: 'ef-20', category: 'Scope 3 - Category 6: Business Travel', name: 'Domestic & Regional Business Travel (Air & Road)', fuel_or_material: 'Business Travel', factor: 0.1700, factor_kg_co2e: 0.1700, unit: 'Passenger-km', source: 'DEFRA 2024 Business Travel Guidelines', referenceSource: 'DEFRA 2024 Business Travel Guidelines', year: 2024, isCustom: false },
+
+  // Scope 3 - Category 7: Employee Commuting
+  { id: 'ef-21', category: 'Scope 3 - Category 7: Employee Commuting', name: 'Daily Staff Commuting (Motorbike, Bus, Train blend)', fuel_or_material: 'Employee Commuting', factor: 0.0890, factor_kg_co2e: 0.0890, unit: 'Passenger-km', source: 'DEFRA 2024 / SLSEA Commuting Factors', referenceSource: 'DEFRA 2024 / SLSEA Commuting Factors', year: 2024, isCustom: false },
+
+  // Scope 3 - Category 5: Waste in Operations
+  { id: 'ef-22', category: 'Scope 3 - Category 5: Waste in Operations', name: 'Municipal Solid Waste & Operational Landfill', fuel_or_material: 'Solid Waste', factor: 0.5200, factor_kg_co2e: 0.5200, unit: 'kg', source: 'DEFRA 2024 Waste Disposal Standards', referenceSource: 'DEFRA 2024 Waste Disposal Standards', year: 2024, isCustom: false },
+  { id: 'ef-23', category: 'Scope 3 - Category 5: Waste in Operations', name: 'Recycled Copper Wire & Metallic Scrap', fuel_or_material: 'Scrap Metal', factor: 0.4500, factor_kg_co2e: 0.4500, unit: 'kg', source: 'IPCC Waste Treatment Guidelines', referenceSource: 'IPCC Waste Treatment Guidelines', year: 2024, isCustom: false },
+
+  // Scope 3 - Category 4: Upstream Freight & Distribution
+  { id: 'ef-24', category: 'Scope 3 - Category 4: Upstream Freight & Distribution', name: 'Central Stores to Regional CSC Heavy Freight Transport', fuel_or_material: 'Stores Freight', factor: 0.1200, factor_kg_co2e: 0.1200, unit: 'Tonne-km', source: 'DEFRA 2024 Freight Logistics Factor', referenceSource: 'DEFRA 2024 Freight Logistics Factor', year: 2024, isCustom: false }
 ];
 
 export const INITIAL_SCOPE1_RECORDS: Scope1Record[] = [

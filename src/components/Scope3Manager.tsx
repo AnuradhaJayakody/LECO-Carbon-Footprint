@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { Scope3Record, Scope3Category, EmissionFactor } from '../types';
 import { api } from '../services/api';
@@ -243,11 +243,86 @@ export const Scope3Manager: React.FC = () => {
     fetchRecords();
   }, [selectedYear, selectedFacilityId]);
 
-  // Combine fetched Scope 3 factors with presets
-  const availableItems = DEFAULT_SCOPE3_PRESETS.filter(p => p.category === category);
+  // Helper to map Scope3Category enum to emission factor category key
+  const getCategoryKey = (cat: Scope3Category): string => {
+    switch (cat) {
+      case 'purchased_goods': return 'Scope 3 - Category 1: Purchased Goods & Equipment';
+      case 'capital_goods': return 'Scope 3 - Category 2: Capital Goods';
+      case 'business_travel': return 'Scope 3 - Category 6: Business Travel';
+      case 'employee_commuting': return 'Scope 3 - Category 7: Employee Commuting';
+      case 'waste_generated': return 'Scope 3 - Category 5: Waste in Operations';
+      case 'upstream_logistics': return 'Scope 3 - Category 4: Upstream Freight & Distribution';
+      default: return 'Scope 3';
+    }
+  };
+
+  // Dynamic filtering of active emission factors for the selected Scope 3 Category
+  const availableItems: Scope3Preset[] = useMemo(() => {
+    const targetKey = getCategoryKey(category);
+    const matchedFromDb = emissionFactors.filter(f => {
+      if (f.category === targetKey) return true;
+      const catStr = (f.category || '').toLowerCase();
+      if (!catStr.includes('scope 3') && !catStr.includes('category')) return false;
+
+      if (category === 'purchased_goods' && (catStr.includes('category 1') || catStr.includes('purchased'))) return true;
+      if (category === 'capital_goods' && (catStr.includes('category 2') || catStr.includes('capital'))) return true;
+      if (category === 'business_travel' && (catStr.includes('category 6') || catStr.includes('travel'))) return true;
+      if (category === 'employee_commuting' && (catStr.includes('category 7') || catStr.includes('commuting'))) return true;
+      if (category === 'waste_generated' && (catStr.includes('category 5') || catStr.includes('waste'))) return true;
+      if (category === 'upstream_logistics' && (catStr.includes('category 4') || catStr.includes('freight') || catStr.includes('logistics') || catStr.includes('upstream'))) return true;
+      return false;
+    });
+
+    if (matchedFromDb.length > 0) {
+      return matchedFromDb.map(f => {
+        const rawFactor = Number(f.factor ?? f.factor_kg_co2e ?? 0);
+        // If rawFactor is in kg CO2e, convert to tCO2e for formula (kg / 1000) if rawFactor > 0.05 or unit is kg/unit
+        // Usually factor_kg_co2e is in kg CO2e. Convert to tCO2e per unit:
+        const factorTonsPerUnit = rawFactor >= 0.01 ? Number((rawFactor / 1000).toFixed(6)) : rawFactor;
+        return {
+          id: f.id || f.name,
+          category,
+          name: f.name || f.fuel_or_material,
+          factorTonsPerUnit: factorTonsPerUnit || 0.001,
+          unit: f.unit || 'Units',
+          source: f.source || f.referenceSource || 'IPCC / DEFRA / SLSEA Standard',
+          defaultQty: 100
+        };
+      });
+    }
+
+    return DEFAULT_SCOPE3_PRESETS.filter(p => p.category === category);
+  }, [category, emissionFactors]);
 
   const handleCategoryChange = (cat: Scope3Category) => {
     setCategory(cat);
+    const targetKey = getCategoryKey(cat);
+    const matchedFromDb = emissionFactors.filter(f => {
+      if (f.category === targetKey) return true;
+      const catStr = (f.category || '').toLowerCase();
+      if (!catStr.includes('scope 3') && !catStr.includes('category')) return false;
+      if (cat === 'purchased_goods' && (catStr.includes('category 1') || catStr.includes('purchased'))) return true;
+      if (cat === 'capital_goods' && (catStr.includes('category 2') || catStr.includes('capital'))) return true;
+      if (cat === 'business_travel' && (catStr.includes('category 6') || catStr.includes('travel'))) return true;
+      if (cat === 'employee_commuting' && (catStr.includes('category 7') || catStr.includes('commuting'))) return true;
+      if (cat === 'waste_generated' && (catStr.includes('category 5') || catStr.includes('waste'))) return true;
+      if (cat === 'upstream_logistics' && (catStr.includes('category 4') || catStr.includes('freight') || catStr.includes('logistics') || catStr.includes('upstream'))) return true;
+      return false;
+    });
+
+    if (matchedFromDb.length > 0) {
+      const first = matchedFromDb[0];
+      const rawFactor = Number(first.factor ?? first.factor_kg_co2e ?? 0);
+      const factorTons = rawFactor >= 0.01 ? Number((rawFactor / 1000).toFixed(6)) : rawFactor;
+      setSelectedPresetId(first.id || first.name);
+      setItemName(first.name || first.fuel_or_material);
+      setUnit(first.unit || 'Units');
+      setFactorUsed(factorTons || 0.001);
+      setFactorSource(first.source || first.referenceSource || 'IPCC / SLSEA');
+      setQuantity(100);
+      return;
+    }
+
     const presetsForCat = DEFAULT_SCOPE3_PRESETS.filter(p => p.category === cat);
     if (presetsForCat.length > 0) {
       const first = presetsForCat[0];
@@ -262,7 +337,7 @@ export const Scope3Manager: React.FC = () => {
 
   const handlePresetSelect = (presetId: string) => {
     setSelectedPresetId(presetId);
-    const found = DEFAULT_SCOPE3_PRESETS.find(p => p.id === presetId);
+    const found = availableItems.find(p => p.id === presetId);
     if (found) {
       setItemName(found.name);
       setUnit(found.unit);

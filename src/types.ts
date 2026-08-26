@@ -160,7 +160,8 @@ export interface Scope3Record {
 
 export interface EmissionFactor {
   id: string;
-  category: 'Scope 1' | 'Scope 2' | 'Scope 3';
+  category: string; // e.g. 'Scope 1 - Stationary Diesel Generator (Backup Power)', 'Scope 2 - Grid Electricity', etc.
+  scope?: 'Scope 1' | 'Scope 2' | 'Scope 3' | string;
   name: string;
   factor: number;
   unit: string;

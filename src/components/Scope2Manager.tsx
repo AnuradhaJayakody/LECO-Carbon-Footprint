@@ -89,9 +89,10 @@ export const Scope2Manager: React.FC = () => {
 
   const resolveGridFactor = (factors: EmissionFactor[]) => {
     const match = factors.find(f => {
-      if (f.category === 'Scope 2') return true;
+      if (f.category === 'Scope 2 - Grid Electricity') return true;
+      const cat = (f.category || '').toLowerCase();
       const n = (f.name || f.fuel_or_material || '').toLowerCase();
-      return n.includes('grid') || n.includes('ceb') || n.includes('electricity');
+      return cat.includes('scope 2') || n.includes('grid') || n.includes('ceb') || n.includes('electricity');
     });
 
     if (match) {

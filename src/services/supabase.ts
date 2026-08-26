@@ -844,12 +844,16 @@ export function toEmissionFactorRow(ef: Partial<EmissionFactor>): Record<string,
 }
 
 export function fromEmissionFactorRow(row: any): EmissionFactor {
-  const categoryRaw = row.category || row.scope_category || row.scope || 'Scope 1';
-  let category: 'Scope 1' | 'Scope 2' | 'Scope 3' = 'Scope 1';
-  const catLower = String(categoryRaw || '').toLowerCase();
-  if (catLower.includes('2')) category = 'Scope 2';
-  else if (catLower.includes('3')) category = 'Scope 3';
-  else category = 'Scope 1';
+  const categoryRaw = String(row.category || row.scope_category || row.scope || 'Scope 1');
+  let scope: 'Scope 1' | 'Scope 2' | 'Scope 3' = 'Scope 1';
+  const catLower = categoryRaw.toLowerCase();
+  if (catLower.includes('scope 2') || catLower.includes('scope2') || catLower.includes('grid')) {
+    scope = 'Scope 2';
+  } else if (catLower.includes('scope 3') || catLower.includes('scope3') || catLower.includes('category')) {
+    scope = 'Scope 3';
+  } else {
+    scope = 'Scope 1';
+  }
 
   const name = String(row.name || row.fuel_or_material || row.itemName || row.item_name || row.fuel_type || 'Emission Factor');
   const factor = Number(row.factor ?? row.factor_kg_co2e ?? row.coefficient ?? row.value ?? 0);
@@ -859,7 +863,8 @@ export function fromEmissionFactorRow(row: any): EmissionFactor {
 
   return {
     id: String(row.id || ''),
-    category,
+    category: categoryRaw,
+    scope,
     name,
     factor,
     unit,

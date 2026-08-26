@@ -152,69 +152,117 @@ export const Scope1Manager: React.FC = () => {
     fetchRecords();
   }, [selectedYear, selectedFacilityId]);
 
+  // Dynamic categorized factor lists from emission_factors table
+  const generatorFactors = useMemo(() => {
+    const direct = emissionFactors.filter(f => f.category === 'Scope 1 - Stationary Diesel Generator (Backup Power)');
+    if (direct.length > 0) return direct;
+    return emissionFactors.filter(f => {
+      const c = (f.category || '').toLowerCase();
+      const n = (f.name || f.fuel_or_material || '').toLowerCase();
+      return (c.includes('scope 1') || c.includes('stationary')) && (n.includes('diesel') || n.includes('generator') || n.includes('fuel'));
+    });
+  }, [emissionFactors]);
+
+  const vehicleFactors = useMemo(() => {
+    const direct = emissionFactors.filter(f => f.category === 'Scope 1 - Mobile Fleet Vehicle (Lorry / Van / Boom Truck)');
+    if (direct.length > 0) return direct;
+    return emissionFactors.filter(f => {
+      const c = (f.category || '').toLowerCase();
+      const n = (f.name || f.fuel_or_material || '').toLowerCase();
+      return (c.includes('scope 1') || c.includes('mobile') || c.includes('fleet')) && (n.includes('diesel') || n.includes('petrol') || n.includes('lorry') || n.includes('van'));
+    });
+  }, [emissionFactors]);
+
+  const sf6Factors = useMemo(() => {
+    const direct = emissionFactors.filter(f => f.category === 'Scope 1 - Fugitive SF6 Gas (Circuit Breaker / Switchgear)');
+    if (direct.length > 0) return direct;
+    return emissionFactors.filter(f => {
+      const c = (f.category || '').toLowerCase();
+      const n = (f.name || f.fuel_or_material || '').toLowerCase();
+      return n.includes('sf6') || c.includes('sf6');
+    });
+  }, [emissionFactors]);
+
+  const refrigerantFactors = useMemo(() => {
+    const direct = emissionFactors.filter(f => f.category === 'Scope 1 - Fugitive HVAC Refrigerant (R410A / R134a)');
+    if (direct.length > 0) return direct;
+    return emissionFactors.filter(f => {
+      const c = (f.category || '').toLowerCase();
+      const n = (f.name || f.fuel_or_material || '').toLowerCase();
+      return c.includes('refrigerant') || c.includes('hvac') || n.includes('r410') || n.includes('r134') || n.includes('r22');
+    });
+  }, [emissionFactors]);
+
   // Helper to find exact matching emission factor from active library
   const resolveFactor = (cat: Scope1Category, fuel: string, gas: string) => {
     if (cat === 'fugitive_sf6') {
-      const match = emissionFactors.find(f => 
-        (f.name && f.name.toLowerCase().includes('sf6')) || 
-        (f.fuel_or_material && f.fuel_or_material.toLowerCase().includes('sf6'))
-      );
+      const match = sf6Factors.find(f => (f.name || f.fuel_or_material || '').toLowerCase().includes(gas.toLowerCase())) || sf6Factors[0];
       if (match) {
         return {
           factor: Number(match.factor ?? match.factor_kg_co2e ?? 22800),
           source: match.source || match.referenceSource || 'IPCC AR4/AR5 GWP Factor',
-          unit: match.unit?.split('/')[1]?.trim() || 'kg'
+          unit: match.unit || 'kg',
+          matchedName: match.name || match.fuel_or_material
         };
       }
-      return { factor: 22800, source: 'IPCC AR4/AR5 GWP Factor (22,800 kg CO₂e/kg)', unit: 'kg' };
+      return { factor: 22800, source: 'IPCC AR4/AR5 GWP Factor (22,800 kg CO₂e/kg)', unit: 'kg', matchedName: 'SF6 Gas' };
     }
 
     if (cat === 'fugitive_refrigerant') {
       const targetGas = (gas || 'R410A').toLowerCase();
-      const match = emissionFactors.find(f => {
+      const match = refrigerantFactors.find(f => {
         const n = (f.name || f.fuel_or_material || '').toLowerCase();
-        return n.includes(targetGas);
-      });
+        return n.includes(targetGas) || targetGas.includes(n);
+      }) || refrigerantFactors[0];
+
       if (match) {
         return {
           factor: Number(match.factor ?? match.factor_kg_co2e ?? 2088),
           source: match.source || match.referenceSource || 'IPCC AR4 GWP Factor',
-          unit: match.unit?.split('/')[1]?.trim() || 'kg'
+          unit: match.unit || 'kg',
+          matchedName: match.name || match.fuel_or_material
         };
       }
       const fallback = DEFAULT_S1_FACTORS[gas] || { factor: 2088, unit: 'kg', source: 'IPCC AR4 GWP Factor' };
-      return { factor: fallback.factor, source: fallback.source, unit: fallback.unit };
+      return { factor: fallback.factor, source: fallback.source, unit: fallback.unit, matchedName: gas };
     }
 
-    // Fuel Combustion (stationary or mobile)
-    const targetFuel = (fuel || 'Diesel').toLowerCase();
-    const match = emissionFactors.find(f => {
-      if (f.category !== 'Scope 1') return false;
-      const n = (f.name || f.fuel_or_material || '').toLowerCase();
-      const sub = (f.subCategory || '').toLowerCase();
-      
-      if (cat === 'stationary_generator') {
-        if (targetFuel.includes('diesel') && (n.includes('industrial generator') || n.includes('stationary'))) return true;
-        if (targetFuel.includes('heavy fuel') && n.includes('heavy fuel')) return true;
-        if (targetFuel.includes('lpg') && n.includes('lpg')) return true;
-      } else if (cat === 'mobile_fleet') {
-        if (targetFuel.includes('diesel') && (n.includes('commercial') || n.includes('mobile') || n.includes('truck'))) return true;
-        if (targetFuel.includes('petrol') && (n.includes('petrol') || n.includes('gasoline'))) return true;
+    if (cat === 'stationary_generator') {
+      const targetFuel = (fuel || 'Diesel').toLowerCase();
+      const match = generatorFactors.find(f => {
+        const n = (f.name || f.fuel_or_material || '').toLowerCase();
+        return n.includes(targetFuel) || targetFuel.includes(n);
+      }) || generatorFactors[0];
+
+      if (match) {
+        return {
+          factor: Number(match.factor ?? match.factor_kg_co2e ?? 2.6878),
+          source: match.source || match.referenceSource || 'IPCC 2006 Guidelines',
+          unit: match.unit || 'Liters',
+          matchedName: match.name || match.fuel_or_material
+        };
       }
-      return n.includes(targetFuel);
-    });
+      return { factor: 2.6878, source: 'IPCC 2006 Stationary Combustion Factor', unit: 'Liters', matchedName: fuel };
+    }
+
+    // mobile_fleet
+    const targetFuel = (fuel || 'Diesel').toLowerCase();
+    const match = vehicleFactors.find(f => {
+      const n = (f.name || f.fuel_or_material || '').toLowerCase();
+      return n.includes(targetFuel) || targetFuel.includes(n);
+    }) || vehicleFactors[0];
 
     if (match) {
       return {
         factor: Number(match.factor ?? match.factor_kg_co2e ?? 2.6878),
         source: match.source || match.referenceSource || 'IPCC 2006 Guidelines',
-        unit: 'Liters'
+        unit: match.unit || 'Liters',
+        matchedName: match.name || match.fuel_or_material
       };
     }
 
-    // Fallback default
     const fallback = DEFAULT_S1_FACTORS[fuel] || (targetFuel.includes('petrol') ? DEFAULT_S1_FACTORS['Petrol'] : DEFAULT_S1_FACTORS['Diesel']);
-    return { factor: fallback.factor, source: fallback.source, unit: fallback.unit };
+    return { factor: fallback.factor, source: fallback.source, unit: fallback.unit, matchedName: fuel };
   };
 
   // Auto-update factor when category, fuelType, or gasType changes
@@ -772,7 +820,7 @@ export const Scope1Manager: React.FC = () => {
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="block font-semibold text-slate-700 mb-1">
-                        {category === 'fugitive_sf6' ? 'Fugitive Gas Type' : 'Refrigerant Type'}
+                        {category === 'fugitive_sf6' ? 'Fugitive Gas Type *' : 'Refrigerant Type *'}
                       </label>
                       {category === 'fugitive_sf6' ? (
                         <select
@@ -780,7 +828,15 @@ export const Scope1Manager: React.FC = () => {
                           onChange={(e) => setGasType(e.target.value)}
                           className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-slate-800 font-mono font-bold"
                         >
-                          <option value="SF6">SF₆ (Sulfur Hexafluoride - Switchgear)</option>
+                          {sf6Factors.length > 0 ? (
+                            sf6Factors.map(f => (
+                              <option key={f.id || f.name} value={f.name || f.fuel_or_material}>
+                                {f.name || f.fuel_or_material} ({f.factor ?? f.factor_kg_co2e} kg CO₂e/{f.unit || 'kg'})
+                              </option>
+                            ))
+                          ) : (
+                            <option value="SF6">SF₆ (Sulfur Hexafluoride - Switchgear)</option>
+                          )}
                         </select>
                       ) : (
                         <select
@@ -788,9 +844,19 @@ export const Scope1Manager: React.FC = () => {
                           onChange={(e) => setGasType(e.target.value)}
                           className="w-full px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-slate-800 font-mono font-bold"
                         >
-                          <option value="R410A">R410A Refrigerant</option>
-                          <option value="R134a">R134a Refrigerant</option>
-                          <option value="R22">R22 Refrigerant</option>
+                          {refrigerantFactors.length > 0 ? (
+                            refrigerantFactors.map(f => (
+                              <option key={f.id || f.name} value={f.name || f.fuel_or_material}>
+                                {f.name || f.fuel_or_material} ({f.factor ?? f.factor_kg_co2e} kg CO₂e/{f.unit || 'kg'})
+                              </option>
+                            ))
+                          ) : (
+                            <>
+                              <option value="R410A">R410A Refrigerant</option>
+                              <option value="R134a">R134a Refrigerant</option>
+                              <option value="R22">R22 Refrigerant</option>
+                            </>
+                          )}
                         </select>
                       )}
                     </div>
@@ -835,18 +901,41 @@ export const Scope1Manager: React.FC = () => {
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                     <div>
                       <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">
-                        Fuel Type *
+                        Fuel / Energy Type *
                       </label>
                       <select
                         value={fuelType}
                         onChange={(e) => setFuelType(e.target.value)}
                         className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-800 font-semibold focus:outline-none focus:ring-2 focus:ring-orange-500"
                       >
-                        <option value="Diesel">Auto Diesel (Generator / Trucks)</option>
-                        <option value="Super Diesel">Super Diesel (Euro 4)</option>
-                        <option value="Heavy Fuel Oil">Heavy Fuel Oil (Furnace Oil)</option>
-                        <option value="LPG">LPG (Liquid Petroleum Gas)</option>
-                        <option value="Petrol">Petrol / Gasoline (Vans & Cycles)</option>
+                        {category === 'stationary_generator' ? (
+                          generatorFactors.length > 0 ? (
+                            generatorFactors.map(f => (
+                              <option key={f.id || f.name} value={f.name || f.fuel_or_material}>
+                                {f.name || f.fuel_or_material} ({f.factor ?? f.factor_kg_co2e} kg CO₂e/{f.unit || 'L'})
+                              </option>
+                            ))
+                          ) : (
+                            <>
+                              <option value="Diesel">Auto Diesel (Stationary Generator)</option>
+                              <option value="Heavy Fuel Oil">Heavy Fuel Oil (Furnace Oil)</option>
+                              <option value="LPG">LPG (Stationary)</option>
+                            </>
+                          )
+                        ) : (
+                          vehicleFactors.length > 0 ? (
+                            vehicleFactors.map(f => (
+                              <option key={f.id || f.name} value={f.name || f.fuel_or_material}>
+                                {f.name || f.fuel_or_material} ({f.factor ?? f.factor_kg_co2e} kg CO₂e/{f.unit || 'L'})
+                              </option>
+                            ))
+                          ) : (
+                            <>
+                              <option value="Diesel">Auto Diesel (Fleet Vehicle)</option>
+                              <option value="Petrol">Petrol / Gasoline (Vans & Cycles)</option>
+                            </>
+                          )
+                        )}
                       </select>
                     </div>
 
