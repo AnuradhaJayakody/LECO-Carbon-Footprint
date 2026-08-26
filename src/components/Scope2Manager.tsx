@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { Scope2Record } from '../types';
+import { Scope2Record, EmissionFactor } from '../types';
 import { api } from '../services/api';
-import { supabase, toScope2Row, fromScope2Row } from '../services/supabase';
+import { supabase, toScope2Row, fromScope2Row, fromEmissionFactorRow } from '../services/supabase';
 import { 
   Zap, 
   Plus, 
@@ -13,12 +13,12 @@ import {
   Sun, 
   Building2, 
   Layers, 
-  Calendar,
-  FileSpreadsheet
+  Lock,
+  RefreshCw,
+  Info
 } from 'lucide-react';
 
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-const SRI_LANKA_GRID_FACTOR_KG = 0.582; // 0.582 kg CO2e per kWh (SLSEA standard)
 
 export const Scope2Manager: React.FC = () => {
   const { 
@@ -28,13 +28,14 @@ export const Scope2Manager: React.FC = () => {
     canDelete, 
     notify, 
     user,
-    isSuperAdmin,
-    isBranchAdmin,
     isFacilityUser,
     getScopedFacilities
   } = useAuth();
 
   const [records, setRecords] = useState<Scope2Record[]>([]);
+  const [emissionFactors, setEmissionFactors] = useState<EmissionFactor[]>([]);
+  const [gridFactor, setGridFactor] = useState<number>(0.582);
+  const [gridFactorSource, setGridFactorSource] = useState<string>('Sri Lanka Sustainable Energy Authority (SLSEA)');
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
 
@@ -55,6 +56,55 @@ export const Scope2Manager: React.FC = () => {
 
   const scopedFacilities = getScopedFacilities();
 
+  // 1. Fetch Emission Factors on Mount
+  const fetchEmissionFactors = async () => {
+    try {
+      if (supabase) {
+        try {
+          const { data, error } = await supabase
+            .from('emission_factors')
+            .select('*')
+            .order('category', { ascending: true });
+
+          if (!error && data && data.length > 0) {
+            const mapped = data.map(fromEmissionFactorRow);
+            setEmissionFactors(mapped);
+            resolveGridFactor(mapped);
+            return;
+          }
+        } catch (sbErr) {
+          console.warn('Supabase fetch emission factors in Scope 2:', sbErr);
+        }
+      }
+
+      const data = await api.getEmissionFactors();
+      if (data) {
+        setEmissionFactors(data);
+        resolveGridFactor(data);
+      }
+    } catch (err) {
+      console.warn('Failed to load emission factors for Scope 2:', err);
+    }
+  };
+
+  const resolveGridFactor = (factors: EmissionFactor[]) => {
+    const match = factors.find(f => {
+      if (f.category === 'Scope 2') return true;
+      const n = (f.name || f.fuel_or_material || '').toLowerCase();
+      return n.includes('grid') || n.includes('ceb') || n.includes('electricity');
+    });
+
+    if (match) {
+      const val = Number(match.factor ?? match.factor_kg_co2e ?? 0.582);
+      setGridFactor(val);
+      setGridFactorSource(match.source || match.referenceSource || 'SLSEA National Grid Standard');
+    } else {
+      setGridFactor(0.582);
+      setGridFactorSource('Sri Lanka Sustainable Energy Authority (SLSEA)');
+    }
+  };
+
+  // 2. Fetch Scope 2 Records
   const fetchRecords = async () => {
     setLoading(true);
     try {
@@ -89,6 +139,10 @@ export const Scope2Manager: React.FC = () => {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    fetchEmissionFactors();
+  }, []);
 
   useEffect(() => {
     fetchRecords();
@@ -136,13 +190,19 @@ export const Scope2Manager: React.FC = () => {
     }
   };
 
-  const calculateGrossTons = (kwh: number): number => {
-    return Number(((kwh * SRI_LANKA_GRID_FACTOR_KG) / 1000).toFixed(3));
-  };
-
-  const calculateSolarOffsetTons = (solarKwh: number): number => {
-    return Number(((solarKwh * SRI_LANKA_GRID_FACTOR_KG) / 1000).toFixed(3));
-  };
+  // Real-time calculations using dynamically fetched grid factor
+  const calculatedOutputs = useMemo(() => {
+    const grossTons = Number((((Number(gridElectricityKWh) || 0) * gridFactor) / 1000).toFixed(4));
+    const solarOffsetTons = Number((((Number(solarGenerationKWh) || 0) * gridFactor) / 1000).toFixed(4));
+    const netTons = Math.max(0, Number((grossTons - solarOffsetTons).toFixed(4)));
+    return {
+      grossTons,
+      solarOffsetTons,
+      netTons,
+      grossKg: Number(((Number(gridElectricityKWh) || 0) * gridFactor).toFixed(2)),
+      solarOffsetKg: Number(((Number(solarGenerationKWh) || 0) * gridFactor).toFixed(2))
+    };
+  }, [gridElectricityKWh, solarGenerationKWh, gridFactor]);
 
   const handleSaveRecord = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -151,9 +211,6 @@ export const Scope2Manager: React.FC = () => {
       return;
     }
 
-    const grossTons = calculateGrossTons(gridElectricityKWh);
-    const solarOffsetTons = calculateSolarOffsetTons(solarGenerationKWh);
-    const netTons = Math.max(0, Number((grossTons - solarOffsetTons).toFixed(3)));
     const targetFac = facilities.find(f => f.id === facilityId);
 
     const payload: Partial<Scope2Record> = {
@@ -165,10 +222,10 @@ export const Scope2Manager: React.FC = () => {
       meterNumber: meterNumber.trim(),
       gridElectricityKWh: Number(gridElectricityKWh),
       solarGenerationKWh: Number(solarGenerationKWh),
-      gridEmissionFactor: SRI_LANKA_GRID_FACTOR_KG,
-      emissionsTonsCO2e: grossTons,
-      solarOffsetTonsCO2e: solarOffsetTons,
-      netEmissionsTonsCO2e: netTons,
+      gridEmissionFactor: gridFactor,
+      emissionsTonsCO2e: calculatedOutputs.grossTons,
+      solarOffsetTonsCO2e: calculatedOutputs.solarOffsetTons,
+      netEmissionsTonsCO2e: calculatedOutputs.netTons,
       costLKR: Number(costLKR),
       notes: notes.trim()
     };
@@ -251,7 +308,7 @@ export const Scope2Manager: React.FC = () => {
   const totalSolarOffset = records.reduce((acc, r) => acc + (r.solarOffsetTonsCO2e || 0), 0);
 
   const filteredRecords = records.filter(r => {
-    return r.facilityName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    return (r.facilityName || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
            (r.accountNumber && r.accountNumber.toLowerCase().includes(searchTerm.toLowerCase())) ||
            (r.notes && r.notes.toLowerCase().includes(searchTerm.toLowerCase()));
   });
@@ -270,7 +327,7 @@ export const Scope2Manager: React.FC = () => {
             CEB Grid Purchased Electricity & Clean Solar Offsets
           </h1>
           <p className="text-xs text-slate-500 mt-0.5">
-            Record monthly utility electricity consumption and clean rooftop solar PV generation across all LECO premises (SLSEA standard: 0.582 kg CO₂e/kWh).
+            Record monthly utility electricity consumption and clean rooftop solar PV generation across all LECO premises with database-governed emission factors.
           </p>
         </div>
 
@@ -323,7 +380,7 @@ export const Scope2Manager: React.FC = () => {
       </div>
 
       {/* Filter and Search Bar */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex items-center justify-between gap-3">
+      <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-3">
         <div className="relative w-full sm:w-80">
           <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
           <input
@@ -335,9 +392,10 @@ export const Scope2Manager: React.FC = () => {
           />
         </div>
 
-        <span className="text-xs text-slate-500 font-mono">
-          SLSEA Factor: <strong>0.582 kg CO₂e / kWh</strong>
-        </span>
+        <div className="flex items-center gap-2 text-xs text-slate-600 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200">
+          <Lock className="w-3.5 h-3.5 text-emerald-600" />
+          <span>Active Grid Factor: <strong>{gridFactor.toFixed(4).replace(/\.?0+$/, '')} kg CO₂e / kWh</strong></span>
+        </div>
       </div>
 
       {/* Records Table */}
@@ -351,6 +409,7 @@ export const Scope2Manager: React.FC = () => {
                 <th className="py-3.5 px-4">Account / Meter</th>
                 <th className="py-3.5 px-4 text-right">Grid Consumed (kWh)</th>
                 <th className="py-3.5 px-4 text-right">Solar Generated (kWh)</th>
+                <th className="py-3.5 px-4 text-right">Factor Used</th>
                 <th className="py-3.5 px-4 text-right font-black text-slate-900">Gross GHG (tCO₂e)</th>
                 <th className="py-3.5 px-4 text-right text-emerald-700 font-bold">Solar Offset</th>
                 <th className="py-3.5 px-4 text-right">Actions</th>
@@ -359,20 +418,17 @@ export const Scope2Manager: React.FC = () => {
             <tbody className="divide-y divide-slate-100 text-slate-700">
               {filteredRecords.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="py-8 text-center text-slate-400">
-                    No Scope 2 electricity billing records found for the active filter. Click "Log Electricity Bill" to add data.
+                  <td colSpan={9} className="py-8 text-center text-slate-400">
+                    No Scope 2 electricity records found. Click "Log Electricity Bill" to add data.
                   </td>
                 </tr>
               ) : (
                 filteredRecords.map((r) => (
                   <tr key={r.id} className="hover:bg-slate-50/80 transition">
-                    
-                    {/* Period */}
                     <td className="py-3.5 px-4 font-semibold text-slate-900 whitespace-nowrap">
                       {MONTH_NAMES[r.reportingMonth - 1]} {r.reportingYear}
                     </td>
 
-                    {/* Facility */}
                     <td className="py-3.5 px-4">
                       <div className="font-semibold text-slate-900 flex items-center gap-1.5">
                         <Building2 className="w-3.5 h-3.5 text-slate-400 shrink-0" />
@@ -380,33 +436,33 @@ export const Scope2Manager: React.FC = () => {
                       </div>
                     </td>
 
-                    {/* Account / Meter */}
                     <td className="py-3.5 px-4 font-mono text-slate-600">
-                      <div>{r.accountNumber || 'Acc: N/A'}</div>
-                      {r.meterNumber && <div className="text-[10px] text-slate-400">{r.meterNumber}</div>}
+                      <div>{r.accountNumber || 'ACC-N/A'}</div>
+                      <div className="text-[10px] text-slate-400 font-normal">{r.meterNumber || 'MTR-N/A'}</div>
                     </td>
 
-                    {/* Grid kWh */}
                     <td className="py-3.5 px-4 text-right font-mono font-bold text-slate-900">
-                      {(r.gridElectricityKWh ?? (r as any).gridConsumptionKWh ?? 0).toLocaleString()} kWh
+                      {(r.gridElectricityKWh || 0).toLocaleString()} kWh
                     </td>
 
-                    {/* Solar kWh */}
                     <td className="py-3.5 px-4 text-right font-mono text-emerald-700">
-                      {r.solarGenerationKWh ? `${Number(r.solarGenerationKWh).toLocaleString()} kWh` : '-'}
+                      {(r.solarGenerationKWh || 0).toLocaleString()} kWh
                     </td>
 
-                    {/* Gross Emissions */}
+                    <td className="py-3.5 px-4 text-right font-mono text-slate-500">
+                      <span className="bg-slate-100 px-2 py-0.5 rounded text-[11px] font-semibold">
+                        {r.gridEmissionFactor ? Number(r.gridEmissionFactor).toFixed(4).replace(/\.?0+$/, '') : gridFactor.toFixed(4).replace(/\.?0+$/, '')}
+                      </span>
+                    </td>
+
                     <td className="py-3.5 px-4 text-right font-mono font-black text-blue-600 bg-blue-50/30">
-                      {(r.emissionsTonsCO2e ?? (r as any).totalEmissionsTonsCO2e ?? 0).toFixed(3)}
+                      {(r.emissionsTonsCO2e || 0).toFixed(3)}
                     </td>
 
-                    {/* Solar Offset */}
                     <td className="py-3.5 px-4 text-right font-mono font-bold text-emerald-700">
-                      {r.solarOffsetTonsCO2e ? `-${Number(r.solarOffsetTonsCO2e).toFixed(3)}` : '-'}
+                      -{(r.solarOffsetTonsCO2e || 0).toFixed(3)}
                     </td>
 
-                    {/* Actions */}
                     <td className="py-3.5 px-4 text-right">
                       <div className="flex items-center justify-end gap-1.5">
                         <button
@@ -427,7 +483,6 @@ export const Scope2Manager: React.FC = () => {
                         )}
                       </div>
                     </td>
-
                   </tr>
                 ))
               )}
@@ -443,9 +498,9 @@ export const Scope2Manager: React.FC = () => {
             <div className="w-12 h-12 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center mx-auto mb-3">
               <Trash2 className="w-6 h-6" />
             </div>
-            <h3 className="text-base font-bold text-slate-900">Delete Scope 2 Bill Record</h3>
+            <h3 className="text-base font-bold text-slate-900">Delete Electricity Record</h3>
             <p className="text-xs text-slate-500 mt-2">
-              Are you sure you want to delete this electricity record? Summary calculations will update immediately.
+              Are you sure you want to permanently delete this Scope 2 record?
             </p>
             <div className="mt-5 flex items-center justify-center gap-3">
               <button
@@ -470,7 +525,7 @@ export const Scope2Manager: React.FC = () => {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-sm">
           <div className="bg-white rounded-2xl w-full max-w-2xl shadow-2xl border border-slate-200 flex flex-col max-h-[90vh] overflow-hidden">
             
-            {/* Header (Permanently Visible) */}
+            {/* Header */}
             <div className="px-6 py-4 bg-slate-900 text-white flex items-center justify-between shrink-0 border-b border-slate-800">
               <div className="flex items-center gap-2.5">
                 <div className="w-8 h-8 rounded-xl bg-blue-500/20 text-blue-400 flex items-center justify-center">
@@ -493,7 +548,7 @@ export const Scope2Manager: React.FC = () => {
               </button>
             </div>
 
-            {/* Body (Scrollable Only) */}
+            {/* Body */}
             <form id="scope2-form" onSubmit={handleSaveRecord} className="p-6 overflow-y-auto space-y-4 text-xs">
               
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -601,6 +656,32 @@ export const Scope2Manager: React.FC = () => {
                 </div>
               </div>
 
+              {/* Read-Only Auto-Fetched Grid Emission Factor */}
+              <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl">
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block font-bold text-slate-700 uppercase tracking-wider text-[11px]">
+                    Grid Emission Factor (kg CO₂e / kWh) *
+                  </label>
+                  <span className="text-[10px] bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-bold inline-flex items-center gap-1">
+                    <Lock className="w-3 h-3 text-emerald-700" /> Auto-Fetched Factor (Read-Only)
+                  </span>
+                </div>
+                <input
+                  type="number"
+                  value={gridFactor}
+                  readOnly
+                  disabled
+                  className="w-full px-3 py-2 bg-slate-100 border border-slate-200 rounded-xl text-slate-800 font-mono font-black text-sm cursor-not-allowed select-none"
+                />
+                <div className="text-[10px] text-slate-500 mt-1 flex items-center justify-between">
+                  <span className="flex items-center gap-1">
+                    <Info className="w-3 h-3 text-slate-400" />
+                    <span>Authority Benchmark: {gridFactorSource}</span>
+                  </span>
+                  <span className="text-emerald-700 font-medium">Synchronized with Emission Factors Library</span>
+                </div>
+              </div>
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">
@@ -638,9 +719,12 @@ export const Scope2Manager: React.FC = () => {
                   </span>
                   <div className="flex items-baseline gap-1 mt-0.5">
                     <span className="text-xl font-black text-blue-700 font-mono">
-                      {calculateGrossTons(gridElectricityKWh)}
+                      {calculatedOutputs.grossTons.toFixed(3)}
                     </span>
                     <span className="text-xs font-bold text-blue-800">tCO₂e</span>
+                  </div>
+                  <div className="text-[10px] text-blue-600 font-mono mt-0.5">
+                    {calculatedOutputs.grossKg.toLocaleString()} kg CO₂e
                   </div>
                 </div>
 
@@ -650,16 +734,19 @@ export const Scope2Manager: React.FC = () => {
                   </span>
                   <div className="flex items-baseline gap-1 mt-0.5">
                     <span className="text-xl font-black text-emerald-700 font-mono">
-                      -{calculateSolarOffsetTons(solarGenerationKWh)}
+                      -{calculatedOutputs.solarOffsetTons.toFixed(3)}
                     </span>
                     <span className="text-xs font-bold text-emerald-800">tCO₂e</span>
+                  </div>
+                  <div className="text-[10px] text-emerald-600 font-mono mt-0.5">
+                    Net: {calculatedOutputs.netTons.toFixed(3)} tCO₂e
                   </div>
                 </div>
               </div>
 
             </form>
 
-            {/* Footer (Permanently Visible) */}
+            {/* Footer */}
             <div className="px-6 py-4 bg-slate-100 border-t border-slate-200 flex items-center justify-end gap-3 shrink-0">
               <button
                 type="button"
@@ -684,3 +771,4 @@ export const Scope2Manager: React.FC = () => {
     </div>
   );
 };
+

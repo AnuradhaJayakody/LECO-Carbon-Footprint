@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { Scope3Record, Scope3Category } from '../types';
+import { Scope3Record, Scope3Category, EmissionFactor } from '../types';
 import { api } from '../services/api';
-import { supabase, toScope3Row, fromScope3Row } from '../services/supabase';
+import { supabase, toScope3Row, fromScope3Row, fromEmissionFactorRow } from '../services/supabase';
 import { 
   Network, 
   Plus, 
@@ -11,14 +11,124 @@ import {
   Search, 
   X, 
   Building2, 
-  Package, 
-  Plane, 
-  Users, 
-  Trash, 
-  Truck
+  Lock,
+  Info,
+  RefreshCw
 } from 'lucide-react';
 
 const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+interface Scope3Preset {
+  id: string;
+  category: Scope3Category;
+  name: string;
+  factorTonsPerUnit: number;
+  unit: string;
+  source: string;
+  defaultQty: number;
+}
+
+const DEFAULT_SCOPE3_PRESETS: Scope3Preset[] = [
+  {
+    id: 'p1',
+    category: 'purchased_goods',
+    name: 'Smart Single-Phase Electricity Meters (LHM)',
+    factorTonsPerUnit: 0.0085, // 8.5 kg CO2e / unit = 0.0085 tCO2e
+    unit: 'Units',
+    source: 'LECO Meter Factory LCA Study / DEFRA',
+    defaultQty: 500
+  },
+  {
+    id: 'p2',
+    category: 'purchased_goods',
+    name: 'Distribution Transformers 100kVA - 250kVA',
+    factorTonsPerUnit: 0.420, // 420 kg CO2e per unit
+    unit: 'Units',
+    source: 'LECO LCA Environmental Assessment 2023',
+    defaultQty: 10
+  },
+  {
+    id: 'p3',
+    category: 'purchased_goods',
+    name: 'A4 Office Copy Paper (Reams)',
+    factorTonsPerUnit: 0.00095, // 0.95 kg CO2e / kg
+    unit: 'kg',
+    source: 'DEFRA 2024 Material Use',
+    defaultQty: 150
+  },
+  {
+    id: 'p4',
+    category: 'purchased_goods',
+    name: 'Aerial Bundled Cables (ABC) & Conductors',
+    factorTonsPerUnit: 0.0021, // 2.1 kg CO2e / meter
+    unit: 'Meters',
+    source: 'DEFRA 2024 / IPCC Embodied Carbon Guidelines',
+    defaultQty: 1000
+  },
+  {
+    id: 'p5',
+    category: 'capital_goods',
+    name: 'Primary Substation GIS & Switchgear Assemblies',
+    factorTonsPerUnit: 4.500, // 4.5 tCO2e per bay/unit
+    unit: 'Units',
+    source: 'LECO Capital Equipment Carbon Inventory',
+    defaultQty: 2
+  },
+  {
+    id: 'p6',
+    category: 'capital_goods',
+    name: 'Concrete Transmission & Distribution Poles',
+    factorTonsPerUnit: 0.185, // 185 kg CO2e per pole
+    unit: 'Units',
+    source: 'SLSEA Embodied Construction Standards',
+    defaultQty: 50
+  },
+  {
+    id: 'p7',
+    category: 'business_travel',
+    name: 'Domestic & Regional Business Travel (Air & Road)',
+    factorTonsPerUnit: 0.00017, // 0.170 kg CO2e / pass-km
+    unit: 'Passenger-km',
+    source: 'DEFRA 2024 Business Travel Guidelines',
+    defaultQty: 1200
+  },
+  {
+    id: 'p8',
+    category: 'employee_commuting',
+    name: 'Daily Staff Commuting (Motorbike, Bus, Train blend)',
+    factorTonsPerUnit: 0.000089, // 0.089 kg CO2e / pass-km
+    unit: 'Passenger-km',
+    source: 'DEFRA 2024 / SLSEA Commuting Factors',
+    defaultQty: 4500
+  },
+  {
+    id: 'p9',
+    category: 'waste_generated',
+    name: 'Municipal Solid Waste & Operational Landfill',
+    factorTonsPerUnit: 0.00052, // 0.520 kg CO2e / kg
+    unit: 'kg',
+    source: 'DEFRA 2024 Waste Disposal Standards',
+    defaultQty: 800
+  },
+  {
+    id: 'p10',
+    category: 'waste_generated',
+    name: 'Recycled Copper Wire & Metallic Scrap',
+    factorTonsPerUnit: 0.00045, // 0.450 kg CO2e / kg
+    unit: 'kg',
+    source: 'IPCC Waste Treatment Guidelines',
+    defaultQty: 300
+  },
+  {
+    id: 'p11',
+    category: 'upstream_logistics',
+    name: 'Central Stores to Regional CSC Heavy Freight Transport',
+    factorTonsPerUnit: 0.00012, // 0.120 kg CO2e / tonne-km
+    unit: 'Tonne-km',
+    source: 'DEFRA 2024 Freight Logistics Factor',
+    defaultQty: 2500
+  }
+];
 
 export const Scope3Manager: React.FC = () => {
   const { 
@@ -28,14 +138,14 @@ export const Scope3Manager: React.FC = () => {
     canDelete, 
     notify, 
     user,
-    isSuperAdmin,
-    isBranchAdmin,
     isFacilityUser,
     getScopedFacilities
   } = useAuth();
 
   const [records, setRecords] = useState<Scope3Record[]>([]);
+  const [emissionFactors, setEmissionFactors] = useState<EmissionFactor[]>([]);
   const [loading, setLoading] = useState(true);
+  const [factorsLoading, setFactorsLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [categoryFilter, setCategoryFilter] = useState<string>('ALL');
 
@@ -48,15 +158,48 @@ export const Scope3Manager: React.FC = () => {
   const [facilityId, setFacilityId] = useState<string>('');
   const [reportingMonth, setReportingMonth] = useState<number>(1);
   const [category, setCategory] = useState<Scope3Category>('purchased_goods');
-  const [itemName, setItemName] = useState<string>('Distribution Transformers 100kVA');
-  const [supplierName, setSupplierName] = useState<string>('LTL Transformers / Ceylon Transformers');
-  const [quantity, setQuantity] = useState<number>(10);
+  const [selectedPresetId, setSelectedPresetId] = useState<string>('p1');
+  const [itemName, setItemName] = useState<string>('Smart Single-Phase Electricity Meters (LHM)');
+  const [supplierName, setSupplierName] = useState<string>('LECO Meter Testing & Assembly Factory');
+  const [quantity, setQuantity] = useState<number>(500);
   const [unit, setUnit] = useState<string>('Units');
-  const [factorUsed, setFactorUsed] = useState<number>(0.24);
+  const [factorUsed, setFactorUsed] = useState<number>(0.0085);
+  const [factorSource, setFactorSource] = useState<string>('LECO Meter Factory LCA Study / DEFRA');
   const [notes, setNotes] = useState<string>('');
 
   const scopedFacilities = getScopedFacilities();
 
+  // 1. Fetch Active Emission Factors from Supabase
+  const fetchEmissionFactors = async () => {
+    setFactorsLoading(true);
+    try {
+      if (supabase) {
+        try {
+          const { data, error } = await supabase
+            .from('emission_factors')
+            .select('*')
+            .order('category', { ascending: true });
+
+          if (!error && data && data.length > 0) {
+            setEmissionFactors(data.map(fromEmissionFactorRow));
+            setFactorsLoading(false);
+            return;
+          }
+        } catch (sbErr) {
+          console.warn('Supabase fetch emission factors in Scope 3:', sbErr);
+        }
+      }
+
+      const data = await api.getEmissionFactors();
+      setEmissionFactors(data || []);
+    } catch (err) {
+      console.warn('Failed to load emission factors for Scope 3:', err);
+    } finally {
+      setFactorsLoading(false);
+    }
+  };
+
+  // 2. Fetch Scope 3 Records
   const fetchRecords = async () => {
     setLoading(true);
     try {
@@ -93,8 +236,41 @@ export const Scope3Manager: React.FC = () => {
   };
 
   useEffect(() => {
+    fetchEmissionFactors();
+  }, []);
+
+  useEffect(() => {
     fetchRecords();
   }, [selectedYear, selectedFacilityId]);
+
+  // Combine fetched Scope 3 factors with presets
+  const availableItems = DEFAULT_SCOPE3_PRESETS.filter(p => p.category === category);
+
+  const handleCategoryChange = (cat: Scope3Category) => {
+    setCategory(cat);
+    const presetsForCat = DEFAULT_SCOPE3_PRESETS.filter(p => p.category === cat);
+    if (presetsForCat.length > 0) {
+      const first = presetsForCat[0];
+      setSelectedPresetId(first.id);
+      setItemName(first.name);
+      setUnit(first.unit);
+      setFactorUsed(first.factorTonsPerUnit);
+      setFactorSource(first.source);
+      setQuantity(first.defaultQty);
+    }
+  };
+
+  const handlePresetSelect = (presetId: string) => {
+    setSelectedPresetId(presetId);
+    const found = DEFAULT_SCOPE3_PRESETS.find(p => p.id === presetId);
+    if (found) {
+      setItemName(found.name);
+      setUnit(found.unit);
+      setFactorUsed(found.factorTonsPerUnit);
+      setFactorSource(found.source);
+      setQuantity(found.defaultQty);
+    }
+  };
 
   const openAddModal = () => {
     const defaultFacId = (selectedFacilityId !== 'ALL' && selectedFacilityId) 
@@ -105,11 +281,13 @@ export const Scope3Manager: React.FC = () => {
     setFacilityId(defaultFacId);
     setReportingMonth(new Date().getMonth() + 1);
     setCategory('purchased_goods');
-    setItemName('Single Phase Smart Energy Meters');
-    setSupplierName('LECO Meter Factory / Local Supplier');
+    setSelectedPresetId('p1');
+    setItemName('Smart Single-Phase Electricity Meters (LHM)');
+    setSupplierName('LECO Meter Testing & Assembly Factory');
     setQuantity(500);
     setUnit('Units');
-    setFactorUsed(0.008); // 8kg CO2e per meter unit
+    setFactorUsed(0.0085);
+    setFactorSource('LECO Meter Factory LCA Study / DEFRA');
     setNotes('Procured for Western Customer Service expansion');
     setIsModalOpen(true);
   };
@@ -124,37 +302,11 @@ export const Scope3Manager: React.FC = () => {
     setQuantity(r.quantity);
     setUnit(r.unit);
     setFactorUsed(r.emissionFactorUsed);
+    
+    const matchedPreset = DEFAULT_SCOPE3_PRESETS.find(p => p.name.toLowerCase() === r.itemName.toLowerCase());
+    setFactorSource(matchedPreset?.source || 'IPCC / SLSEA Official Standard');
     setNotes(r.notes || '');
     setIsModalOpen(true);
-  };
-
-  const handleCategoryChange = (cat: Scope3Category) => {
-    setCategory(cat);
-    if (cat === 'purchased_goods') {
-      setItemName('Single Phase Electronic Energy Meters');
-      setUnit('Units');
-      setFactorUsed(0.008);
-    } else if (cat === 'capital_goods') {
-      setItemName('160 kVA Distribution Transformers');
-      setUnit('Units');
-      setFactorUsed(0.45);
-    } else if (cat === 'business_travel') {
-      setItemName('Regional Technical Audits & Training Flights');
-      setUnit('Passenger-km');
-      setFactorUsed(0.00015);
-    } else if (cat === 'employee_commuting') {
-      setItemName('Daily Staff Commuting (Bus, Motorcycle & Train)');
-      setUnit('Passenger-km');
-      setFactorUsed(0.000085);
-    } else if (cat === 'waste_generated') {
-      setItemName('Solid Waste & Recycled Metal / Scrap');
-      setUnit('kg');
-      setFactorUsed(0.00045);
-    } else if (cat === 'upstream_logistics') {
-      setItemName('Central Stores to Regional CSC Material Haulage');
-      setUnit('Tonne-km');
-      setFactorUsed(0.00012);
-    }
   };
 
   const calculateEmissions = (qty: number, ef: number): number => {
@@ -354,7 +506,16 @@ export const Scope3Manager: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 text-slate-700">
-              {filteredRecords.length === 0 ? (
+              {loading ? (
+                <tr>
+                  <td colSpan={8} className="py-8 text-center text-slate-400">
+                    <div className="flex items-center justify-center gap-2">
+                      <RefreshCw className="w-4 h-4 animate-spin text-purple-600" />
+                      <span>Loading Scope 3 records...</span>
+                    </div>
+                  </td>
+                </tr>
+              ) : filteredRecords.length === 0 ? (
                 <tr>
                   <td colSpan={8} className="py-8 text-center text-slate-400">
                     No Scope 3 indirect emission records found for the active filter. Click "Log Scope 3 Activity" to record data.
@@ -563,6 +724,25 @@ export const Scope3Manager: React.FC = () => {
 
                 <div>
                   <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">
+                    Activity Preset & Standard Factor *
+                  </label>
+                  <select
+                    value={selectedPresetId}
+                    onChange={(e) => handlePresetSelect(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-800 font-semibold focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  >
+                    {availableItems.map(p => (
+                      <option key={p.id} value={p.id}>
+                        {p.name} ({p.factorTonsPerUnit} tCO₂e / {p.unit})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">
                     Item / Activity Description *
                   </label>
                   <input
@@ -574,9 +754,7 @@ export const Scope3Manager: React.FC = () => {
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-800 focus:outline-none focus:ring-2 focus:ring-purple-500"
                   />
                 </div>
-              </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div>
                   <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">
                     Supplier / Logistics Vendor
@@ -589,61 +767,69 @@ export const Scope3Manager: React.FC = () => {
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-800 focus:outline-none focus:ring-2 focus:ring-purple-500"
                   />
                 </div>
-
-                <div>
-                  <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">
-                    Activity Quantity *
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    required
-                    value={quantity}
-                    onChange={(e) => setQuantity(Number(e.target.value))}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-800 font-mono font-bold focus:outline-none focus:ring-2 focus:ring-purple-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">
-                    Unit of Measurement
-                  </label>
-                  <input
-                    type="text"
-                    value={unit}
-                    onChange={(e) => setUnit(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-800 font-mono focus:outline-none focus:ring-2 focus:ring-purple-500"
-                  />
-                </div>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">
-                    Emission Factor (tCO₂e per unit)
+                    Activity Quantity *
                   </label>
-                  <input
-                    type="number"
-                    step="0.000001"
-                    required
-                    value={factorUsed}
-                    onChange={(e) => setFactorUsed(Number(e.target.value))}
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-800 font-mono focus:outline-none focus:ring-2 focus:ring-purple-500"
-                  />
+                  <div className="relative">
+                    <input
+                      type="number"
+                      step="0.01"
+                      required
+                      value={quantity}
+                      onChange={(e) => setQuantity(Number(e.target.value))}
+                      className="w-full pl-3 pr-16 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-800 font-mono font-bold focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    />
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 font-mono text-xs">
+                      {unit}
+                    </span>
+                  </div>
                 </div>
 
                 <div>
-                  <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">
-                    Reference Notes / Tender ID
-                  </label>
-                  <input
-                    type="text"
-                    value={notes}
-                    onChange={(e) => setNotes(e.target.value)}
-                    placeholder="e.g. Tender LECO/PROC/2024/MTR-09"
-                    className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-800 focus:outline-none focus:ring-2 focus:ring-purple-500"
-                  />
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block font-bold text-slate-700 uppercase tracking-wider">
+                      Emission Factor (Read-Only)
+                    </label>
+                    <span className="text-[10px] text-purple-700 bg-purple-50 px-2 py-0.5 rounded font-semibold flex items-center gap-1">
+                      <Lock className="w-3 h-3" />
+                      Official Standard
+                    </span>
+                  </div>
+                  <div className="relative">
+                    <input
+                      type="number"
+                      step="0.000001"
+                      disabled
+                      readOnly
+                      value={factorUsed}
+                      className="w-full pl-3 pr-24 py-2 bg-slate-100 border border-slate-200 rounded-xl text-slate-700 font-mono font-bold cursor-not-allowed select-none"
+                    />
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 font-mono text-[11px]">
+                      tCO₂e / {unit}
+                    </span>
+                  </div>
+                  <div className="mt-1 flex items-center gap-1 text-[11px] text-slate-500">
+                    <Info className="w-3 h-3 text-slate-400 shrink-0" />
+                    <span className="truncate">{factorSource}</span>
+                  </div>
                 </div>
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  Reference Notes / Tender ID
+                </label>
+                <input
+                  type="text"
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder="e.g. Tender LECO/PROC/2024/MTR-09 &bull; Freight Bill #9928"
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-slate-800 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                />
               </div>
 
               {/* Realtime Calculated Emission Preview */}
@@ -653,7 +839,7 @@ export const Scope3Manager: React.FC = () => {
                     Calculated Scope 3 Embodied Emissions
                   </span>
                   <span className="text-[11px] text-purple-800">
-                    Formula: Quantity &times; Coefficient
+                    Formula: {quantity.toLocaleString()} {unit} &times; {factorUsed} tCO₂e/{unit}
                   </span>
                 </div>
                 <div className="text-right">
