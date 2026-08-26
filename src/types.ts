@@ -166,6 +166,7 @@ export interface EmissionFactor {
   factor: number;
   unit: string;
   source: string;
+  source_standard?: string;
   description?: string;
   fuel_or_material?: string;
   factor_kg_co2e?: number;

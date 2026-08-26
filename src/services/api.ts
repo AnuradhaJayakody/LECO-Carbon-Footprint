@@ -316,16 +316,14 @@ export const api = {
     let createdRecord: EmissionFactor | null = null;
 
     if (supabase) {
-      try {
-        const row = toEmissionFactorRow(factor);
-        const result = await safeSupabaseEmissionFactorMutation('insert', row);
-        if (result.success && result.data) {
-          createdRecord = result.data;
-        } else if (result.error) {
-          console.warn('Supabase insert emission_factors notice:', result.error);
-        }
-      } catch (err) {
-        console.warn('Supabase createEmissionFactor exception:', err);
+      const row = toEmissionFactorRow(factor);
+      delete row.id; // Strictly remove frontend ID on insert
+      const result = await safeSupabaseEmissionFactorMutation('insert', row);
+      if (result.success && result.data) {
+        createdRecord = result.data;
+      } else if (result.error) {
+        console.error('Supabase insert emission_factors error in API service:', result.error);
+        throw new Error(result.error?.message || 'Failed to insert emission factor into Supabase database.');
       }
     }
 
@@ -335,8 +333,9 @@ export const api = {
         body: JSON.stringify(factor)
       });
       return createdRecord || serverResult;
-    } catch {
-      return createdRecord || (factor as EmissionFactor);
+    } catch (err: any) {
+      if (createdRecord) return createdRecord;
+      throw new Error(err?.message || 'Failed to save emission factor.');
     }
   },
 
@@ -344,16 +343,13 @@ export const api = {
     let updatedRecord: EmissionFactor | null = null;
 
     if (supabase) {
-      try {
-        const row = toEmissionFactorRow(updates);
-        const result = await safeSupabaseEmissionFactorMutation('update', row, id);
-        if (result.success && result.data) {
-          updatedRecord = result.data;
-        } else if (result.error) {
-          console.warn('Supabase update emission_factors notice:', result.error);
-        }
-      } catch (err) {
-        console.warn('Supabase updateEmissionFactor exception:', err);
+      const row = toEmissionFactorRow(updates);
+      const result = await safeSupabaseEmissionFactorMutation('update', row, id);
+      if (result.success && result.data) {
+        updatedRecord = result.data;
+      } else if (result.error) {
+        console.error('Supabase update emission_factors error in API service:', result.error);
+        throw new Error(result.error?.message || 'Failed to update emission factor in Supabase database.');
       }
     }
 
@@ -363,8 +359,9 @@ export const api = {
         body: JSON.stringify(updates)
       });
       return updatedRecord || serverResult;
-    } catch {
-      return updatedRecord || ({ ...updates, id } as EmissionFactor);
+    } catch (err: any) {
+      if (updatedRecord) return updatedRecord;
+      throw new Error(err?.message || 'Failed to update emission factor.');
     }
   },
 

@@ -232,75 +232,155 @@ export const EmissionFactorsManager: React.FC = () => {
     }
 
     setIsSaving(true);
-    // Concatenate Field 1 and Field 2 into category column
+    // Concatenate Scope and Source Category into standard category column
     const concatenatedCategory = `${selectedScope} - ${selectedSourceCategory}`;
-
-    const payload: Partial<EmissionFactor> = {
-      category: concatenatedCategory,
-      scope: selectedScope,
-      name: fuelOrMaterial.trim(),
-      fuel_or_material: fuelOrMaterial.trim(),
-      factor: Number(factorValue),
-      factor_kg_co2e: Number(factorValue),
-      unit: unit.trim(),
-      source: source.trim(),
-      referenceSource: source.trim(),
-      description: description.trim()
-    };
+    const standardSource = source.trim() || 'Custom / LECO Defined';
 
     try {
       if (editingFactor) {
         // UPDATE OPERATION
         let updatedRecord: EmissionFactor | null = null;
+
         if (supabase) {
-          const rowPayload = toEmissionFactorRow(payload);
-          const result = await safeSupabaseEmissionFactorMutation('update', rowPayload, editingFactor.id);
-          if (result.success && result.data) {
-            updatedRecord = result.data;
-          } else if (result.error && !result.isNetworkError) {
-            console.warn('Supabase emission factor update note:', result.error);
+          // Explicitly map all columns ensuring non-null constraints are satisfied
+          const updatePayload: Record<string, any> = {
+            category: concatenatedCategory,
+            fuel_or_material: fuelOrMaterial.trim(),
+            unit: unit.trim(),
+            factor_kg_co2e: Number(factorValue),
+            source_standard: standardSource
+          };
+
+          if (description.trim()) {
+            updatePayload.description = description.trim();
           }
+
+          const { data, error } = await supabase
+            .from('emission_factors')
+            .update(updatePayload)
+            .eq('id', editingFactor.id)
+            .select()
+            .single();
+
+          if (error) {
+            console.warn('Direct Supabase EF update note, retrying with schema-safe helper:', error);
+            const safeRes = await safeSupabaseEmissionFactorMutation('update', {
+              ...updatePayload,
+              name: fuelOrMaterial.trim(),
+              factor: Number(factorValue),
+              source: standardSource,
+              reference_source: standardSource
+            }, editingFactor.id);
+
+            if (!safeRes.success || !safeRes.data) {
+              throw new Error(safeRes.error?.message || error.message || 'Failed to update emission factor in database.');
+            }
+            updatedRecord = safeRes.data;
+          } else if (data) {
+            updatedRecord = fromEmissionFactorRow(data);
+          }
+        } else {
+          // If Supabase not connected, fallback to API
+          const apiPayload: Partial<EmissionFactor> = {
+            category: concatenatedCategory,
+            scope: selectedScope,
+            name: fuelOrMaterial.trim(),
+            fuel_or_material: fuelOrMaterial.trim(),
+            factor: Number(factorValue),
+            factor_kg_co2e: Number(factorValue),
+            unit: unit.trim(),
+            source: standardSource,
+            source_standard: standardSource,
+            referenceSource: standardSource,
+            description: description.trim()
+          };
+          updatedRecord = await api.updateEmissionFactor(editingFactor.id, apiPayload);
         }
 
         if (!updatedRecord) {
-          updatedRecord = await api.updateEmissionFactor(editingFactor.id, payload);
+          throw new Error('Database operation did not return updated emission factor data.');
         }
 
-        setFactors(prev => prev.map(f => f.id === editingFactor.id ? { ...f, ...payload, id: editingFactor.id } : f));
+        // Update local React state ONLY with the actual verified returned data
+        setFactors(prev => prev.map(f => f.id === editingFactor.id ? updatedRecord! : f));
         notify('Emission factor updated successfully!', 'success');
       } else {
-        // INSERT OPERATION
+        // INSERT OPERATION (STRICT: NO ID FIELD IN PAYLOAD)
         let createdRecord: EmissionFactor | null = null;
+
         if (supabase) {
-          const rowPayload = toEmissionFactorRow(payload);
-          const result = await safeSupabaseEmissionFactorMutation('insert', rowPayload);
-          if (result.success && result.data) {
-            createdRecord = result.data;
-          } else if (result.error && !result.isNetworkError) {
-            console.warn('Supabase emission factor insert note:', result.error);
+          // Satisfies NOT NULL constraints: category, fuel_or_material, unit, factor_kg_co2e, source_standard
+          // Strictly excludes 'id' so PostgreSQL generates the UUID via DEFAULT uuid_generate_v4()
+          const insertPayload: Record<string, any> = {
+            category: concatenatedCategory,
+            fuel_or_material: fuelOrMaterial.trim(),
+            unit: unit.trim(),
+            factor_kg_co2e: Number(factorValue),
+            source_standard: standardSource
+          };
+
+          if (description.trim()) {
+            insertPayload.description = description.trim();
           }
-        }
 
-        if (!createdRecord) {
-          createdRecord = await api.createEmissionFactor({
-            ...payload,
-            id: `ef-${Date.now().toString(36)}`
-          });
-        }
+          const { data, error } = await supabase
+            .from('emission_factors')
+            .insert([insertPayload])
+            .select()
+            .single();
 
-        if (createdRecord) {
-          setFactors(prev => [createdRecord!, ...prev]);
+          if (error) {
+            console.warn('Direct Supabase EF insert failed, retrying with schema-safe helper:', error);
+            const safeRes = await safeSupabaseEmissionFactorMutation('insert', {
+              ...insertPayload,
+              name: fuelOrMaterial.trim(),
+              factor: Number(factorValue),
+              source: standardSource,
+              reference_source: standardSource
+            });
+
+            if (!safeRes.success || !safeRes.data) {
+              console.error('Supabase insert emission factor failure:', error, safeRes.error);
+              throw new Error(safeRes.error?.message || error.message || 'Failed to save emission factor to database.');
+            }
+            createdRecord = safeRes.data;
+          } else if (data) {
+            createdRecord = fromEmissionFactorRow(data);
+          }
         } else {
-          await fetchFactors();
+          // Fallback to API if supabase client is not present
+          const apiPayload: Partial<EmissionFactor> = {
+            category: concatenatedCategory,
+            scope: selectedScope,
+            name: fuelOrMaterial.trim(),
+            fuel_or_material: fuelOrMaterial.trim(),
+            factor: Number(factorValue),
+            factor_kg_co2e: Number(factorValue),
+            unit: unit.trim(),
+            source: standardSource,
+            source_standard: standardSource,
+            referenceSource: standardSource,
+            description: description.trim()
+          };
+          createdRecord = await api.createEmissionFactor(apiPayload);
         }
+
+        if (!createdRecord || !createdRecord.id) {
+          throw new Error('Database operation did not return a valid saved record ID.');
+        }
+
+        // STRICT STATE UPDATE: ONLY using the actual returned data from Supabase
+        setFactors(prev => [createdRecord!, ...prev]);
         notify('New emission factor saved to database!', 'success');
       }
 
+      // Close modal ONLY after successful database confirmation
       setIsModalOpen(false);
       setEditingFactor(null);
     } catch (err: any) {
       console.error('Error saving emission factor:', err);
-      notify(err.message || 'Failed to save emission factor to database.', 'error');
+      // Keep modal open, show error toast, DO NOT update local list
+      notify(err.message || 'Database error: Failed to save emission factor. Please check database connection.', 'error');
     } finally {
       setIsSaving(false);
     }

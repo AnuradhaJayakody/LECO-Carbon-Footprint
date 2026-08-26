@@ -819,24 +819,26 @@ export function toEmissionFactorRow(ef: Partial<EmissionFactor>): Record<string,
     row.category = ef.category;
   }
   if (ef.name !== undefined || ef.fuel_or_material !== undefined) {
-    const n = (ef.name || ef.fuel_or_material || '').trim();
-    row.name = n;
+    const n = (ef.fuel_or_material || ef.name || '').trim();
     row.fuel_or_material = n;
+    row.name = n;
   }
   if (ef.factor !== undefined || ef.factor_kg_co2e !== undefined) {
-    const val = Number(ef.factor ?? ef.factor_kg_co2e ?? 0);
-    row.factor = val;
+    const val = Number(ef.factor_kg_co2e ?? ef.factor ?? 0);
     row.factor_kg_co2e = val;
+    row.factor = val;
   }
   if (ef.unit !== undefined) {
     row.unit = ef.unit.trim();
   }
-  if (ef.source !== undefined || ef.referenceSource !== undefined) {
-    const s = (ef.source || ef.referenceSource || '').trim();
-    row.source = s;
-    row.reference_source = s;
-  }
-  if (ef.description !== undefined) {
+  
+  // Mandatory NOT NULL column: source_standard
+  const stdSource = (ef.source_standard || ef.source || ef.referenceSource || 'Custom / LECO Defined').trim() || 'Custom / LECO Defined';
+  row.source_standard = stdSource;
+  row.source = stdSource;
+  row.reference_source = stdSource;
+
+  if (ef.description !== undefined && ef.description !== null) {
     row.description = ef.description.trim();
     row.notes = ef.description.trim();
   }
@@ -855,10 +857,10 @@ export function fromEmissionFactorRow(row: any): EmissionFactor {
     scope = 'Scope 1';
   }
 
-  const name = String(row.name || row.fuel_or_material || row.itemName || row.item_name || row.fuel_type || 'Emission Factor');
-  const factor = Number(row.factor ?? row.factor_kg_co2e ?? row.coefficient ?? row.value ?? 0);
-  const unit = String(row.unit || row.unit_of_measure || 'kg CO2e');
-  const source = String(row.source || row.reference_source || row.referenceSource || row.governing_authority || 'IPCC / SLSEA');
+  const name = String(row.fuel_or_material || row.name || row.itemName || row.item_name || row.fuel_type || 'Emission Factor');
+  const factor = Number(row.factor_kg_co2e ?? row.factor ?? row.coefficient ?? row.value ?? 0);
+  const unit = String(row.unit || row.unit_of_measure || 'Units');
+  const source = String(row.source_standard || row.source || row.reference_source || row.referenceSource || row.governing_authority || 'Custom / LECO Defined');
   const description = String(row.description || row.notes || row.subCategory || row.sub_category || '');
 
   return {
@@ -869,6 +871,7 @@ export function fromEmissionFactorRow(row: any): EmissionFactor {
     factor,
     unit,
     source,
+    source_standard: source,
     description,
     fuel_or_material: name,
     factor_kg_co2e: factor,
@@ -878,7 +881,7 @@ export function fromEmissionFactorRow(row: any): EmissionFactor {
 
 /**
  * Schema-Safe Supabase Emission Factor Mutation Helper.
- * Handles UUID vs TEXT ID types (22P02), unique constraints, and missing columns (PGRST204).
+ * Handles UUID generation, NOT NULL constraints (source_standard), and missing columns (PGRST204).
  */
 export async function safeSupabaseEmissionFactorMutation(
   operation: 'insert' | 'update' | 'delete',
@@ -904,11 +907,14 @@ export async function safeSupabaseEmissionFactorMutation(
 
   let currentPayload: Record<string, any> = { ...payload };
 
-  // On INSERT: If ID is not a valid UUID, delete it so PostgreSQL can auto-generate
+  // On INSERT: ALWAYS delete frontend ID so PostgreSQL can auto-generate via DEFAULT uuid_generate_v4()
   if (operation === 'insert') {
-    if (!currentPayload.id || !isValidUUID(currentPayload.id)) {
-      delete currentPayload.id;
-    }
+    delete currentPayload.id;
+  }
+
+  // Ensure source_standard is always provided (satisfies NOT NULL constraint)
+  if (!currentPayload.source_standard) {
+    currentPayload.source_standard = currentPayload.source || currentPayload.reference_source || 'Custom / LECO Defined';
   }
 
   const maxRetries = 8;
@@ -920,10 +926,10 @@ export async function safeSupabaseEmissionFactorMutation(
 
     try {
       if (operation === 'insert') {
-        queryResult = await supabase.from('emission_factors').insert([currentPayload]).select().maybeSingle();
+        queryResult = await supabase.from('emission_factors').insert([currentPayload]).select().single();
       } else {
         const idToUpdate = factorId || currentPayload.id;
-        queryResult = await supabase.from('emission_factors').update(currentPayload).eq('id', idToUpdate).select().maybeSingle();
+        queryResult = await supabase.from('emission_factors').update(currentPayload).eq('id', idToUpdate).select().single();
       }
     } catch (err: any) {
       queryResult = { error: err };
@@ -961,7 +967,13 @@ export async function safeSupabaseEmissionFactorMutation(
       continue;
     }
 
-    // 3. Unique violation (23505)
+    // 3. Not-null constraint on source_standard (23502)
+    if (error.code === '23502' && (error.message?.includes('source_standard') || error.message?.includes('"source_standard"'))) {
+      currentPayload.source_standard = 'Custom / LECO Defined';
+      continue;
+    }
+
+    // 4. Unique violation (23505)
     if (error.code === '23505' || error.message?.includes('duplicate key') || error.message?.includes('unique constraint')) {
       if (error.message?.includes('emission_factors_pkey') || error.message?.includes('id')) {
         currentPayload.id = generateUUID();
@@ -969,7 +981,7 @@ export async function safeSupabaseEmissionFactorMutation(
       }
     }
 
-    // 4. Missing column error (PGRST204 / 42703)
+    // 5. Missing column error (PGRST204 / 42703)
     if (
       error.code === 'PGRST204' || 
       error.code === '42703' || 
@@ -990,15 +1002,16 @@ export async function safeSupabaseEmissionFactorMutation(
         continue;
       }
 
-      // Safe pruning of optional columns
+      // Safe pruning of optional alias columns (never prune core schema columns)
       const optionalCols = [
-        'fuel_or_material',
-        'factor_kg_co2e',
         'reference_source',
         'notes',
         'description',
         'unit_of_measure',
-        'item_name'
+        'item_name',
+        'name',
+        'source',
+        'factor'
       ];
       const nextCol = optionalCols.find(col => currentPayload[col] !== undefined);
       if (nextCol) {
